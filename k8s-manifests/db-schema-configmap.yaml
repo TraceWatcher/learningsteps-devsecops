@@ -1,0 +1,21 @@
+apiVersion: v1
+data:
+  database_setup.sql: "-- LearningSteps API Database Setup\n-- This file is automatically
+    ran upon the creation of the PostgresSQL container.\n-- You will notice the following
+    volume mount in the docker-compose.yml file:\n--      \n--      volumes:\n--        -
+    ../database_setup.sql:/docker-entrypoint-initdb.d/database_setup.sql\n\n-- Creates
+    the entries table\nCREATE TABLE IF NOT EXISTS entries (\n    id VARCHAR PRIMARY
+    KEY,\n    data JSONB NOT NULL,\n    created_at TIMESTAMP WITH TIME ZONE NOT NULL,\n
+    \   updated_at TIMESTAMP WITH TIME ZONE NOT NULL\n);\n\n-- Creates an index on
+    created_at for faster queries\nCREATE INDEX IF NOT EXISTS idx_entries_created_at
+    ON entries(created_at);\n\n-- Creates an index on the JSON data for faster searches\nCREATE
+    INDEX IF NOT EXISTS idx_entries_data_gin ON entries USING GIN (data);\n\n-- Verify
+    the table was created\n\\d entries;\n\n-- Test with a sample entry (optional)\n--
+    INSERT INTO entries (id, data, created_at, updated_at) \n-- VALUES (\n--     'test-123',\n--
+    \    '{\"work\": \"Learning SQL\", \"struggle\": \"Understanding JSON types\",
+    \"intention\": \"Practice more queries\"}',\n--     NOW(),\n--     NOW()\n-- );\n\n--
+    Query the test entry\n-- SELECT * FROM entries WHERE id = 'test-123';"
+kind: ConfigMap
+metadata:
+  name: learningsteps-db-schema
+  namespace: learningsteps

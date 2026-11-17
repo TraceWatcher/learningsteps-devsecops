@@ -2,6 +2,8 @@ import json
 import os
 import uuid
 import asyncpg
+import ssl
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 from contextlib import asynccontextmanager
@@ -9,10 +11,6 @@ from dotenv import load_dotenv
 from repositories.interface_repository import DatabaseInterface
 
 load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is missing")
 
 class PostgresDB(DatabaseInterface):
     @staticmethod
@@ -22,10 +20,36 @@ class PostgresDB(DatabaseInterface):
                 return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
         
-    async def __aenter__(self):
-        self.pool = await asyncpg.create_pool(DATABASE_URL)
-        return self
 
+    async def __aenter__(self):
+        password_file = os.getenv("DB_PASSWORD_FILE")
+
+        if password_file:
+            # AKS: Password from Azure Key Vault CSI mount
+            password = Path(password_file).read_text().strip()
+
+            self.pool = await asyncpg.create_pool(
+                host=os.environ["DB_HOST"],
+                port=5432,
+                user=os.environ["DB_USER"],
+                password=password,
+                database=os.environ["DB_NAME"],
+                ssl=ssl.create_default_context(),
+                min_size=1,
+                max_size=3,
+            )
+        else:
+            # Local Docker Compose
+            database_url = os.environ["DATABASE_URL"]
+
+            self.pool = await asyncpg.create_pool(
+                database_url,
+                min_size=1,
+                max_size=3,
+            )
+
+        return self
+  
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.pool.close()
 

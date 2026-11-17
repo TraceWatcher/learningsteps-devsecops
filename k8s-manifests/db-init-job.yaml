@@ -1,0 +1,67 @@
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: learningsteps-db-init
+  namespace: learningsteps
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+
+  template:
+    metadata:
+      labels:
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: learningsteps-api
+      restartPolicy: Never
+
+      containers:
+        - name: postgres-init
+          image: postgres:16-alpine
+
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              export PGPASSWORD="$(cat /mnt/secrets/postgres-admin-password)"
+              export PGSSLMODE=require
+
+              psql \
+                --host="$PGHOST" \
+                --port=5432 \
+                --username="$PGUSER" \
+                --dbname="$PGDATABASE" \
+                --set=ON_ERROR_STOP=1 \
+                --file=/sql/database_setup.sql
+
+              echo "Database schema initialized successfully"
+
+          env:
+            - name: PGHOST
+              value: "psql-learningsteps-305c3ba6.postgres.database.azure.com"
+            - name: PGUSER
+              value: "lsadmin"
+            - name: PGDATABASE
+              value: "learning_journal"
+
+          volumeMounts:
+            - name: keyvault-secrets
+              mountPath: /mnt/secrets
+              readOnly: true
+
+            - name: database-schema
+              mountPath: /sql
+              readOnly: true
+
+      volumes:
+        - name: keyvault-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: learningsteps-keyvault
+
+        - name: database-schema
+          configMap:
+            name: learningsteps-db-schema

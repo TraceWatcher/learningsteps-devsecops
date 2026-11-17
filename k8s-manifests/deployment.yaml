@@ -1,0 +1,71 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: learningsteps-api
+  namespace: learningsteps
+  labels:
+    app: learningsteps-api
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: learningsteps-api
+
+  template:
+    metadata:
+      labels:
+        app: learningsteps-api
+        azure.workload.identity/use: "true"
+
+    spec:
+      serviceAccountName: learningsteps-api
+
+      containers:
+        - name: api
+          image: acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:v0.2.0
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - containerPort: 8000
+
+          envFrom:
+            - configMapRef:
+                name: learningsteps-config
+
+          volumeMounts:
+            - name: keyvault-secrets
+              mountPath: /mnt/secrets
+              readOnly: true
+
+          readinessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+      volumes:
+        - name: keyvault-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: learningsteps-keyvault
