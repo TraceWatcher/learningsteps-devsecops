@@ -28,6 +28,12 @@ resource "azurerm_kubernetes_cluster" "learningsteps" {
 
   sku_tier = "Free"
 
+  role_based_access_control_enabled = true
+
+  api_server_access_profile {
+    authorized_ip_ranges = var.aks_authorized_ip_ranges
+  }
+
   default_node_pool {
     name            = "system"
     node_count      = 2

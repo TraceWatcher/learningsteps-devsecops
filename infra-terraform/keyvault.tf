@@ -14,7 +14,15 @@ resource "azurerm_key_vault" "learningsteps" {
   soft_delete_retention_days = 7
   purge_protection_enabled   = false
 
-  public_network_access_enabled = true
+  # Disable public access to the Key Vault
+  public_network_access_enabled = false
+
+  # Deny unmatched network traffic
+  network_acls {
+    default_action = "Deny"
+    bypass         = "None"
+  }
+
 
   tags = {
     project     = "LearningSteps"

@@ -47,3 +47,8 @@ variable "aks_node_vm_size" {
   description = "VM size for the AKS system node pool"
   type        = string
 }
+
+variable "aks_authorized_ip_ranges" {
+  description = "Allowed public IP ranges for AKS API access"
+  type        = list(string)
+}
