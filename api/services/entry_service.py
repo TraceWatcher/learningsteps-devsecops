@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
-from typing import List, Dict, Any
 import logging
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 from repositories.postgres_repository import PostgresDB
 

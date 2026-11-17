@@ -1,7 +1,9 @@
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional
 from datetime import datetime
+from typing import Optional
 from uuid import uuid4
+
+from pydantic import BaseModel, Field, field_validator
+
 
 class EntryCreate(BaseModel):
     """Model for creating a new journal entry (user input)."""

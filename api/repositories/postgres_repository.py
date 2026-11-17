@@ -1,12 +1,12 @@
 import json
 import os
-import uuid
-import asyncpg
 import ssl
-from pathlib import Path
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List
-from contextlib import asynccontextmanager
+
+import asyncpg
 from dotenv import load_dotenv
 from repositories.interface_repository import DatabaseInterface
 

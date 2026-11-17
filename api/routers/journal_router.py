@@ -1,10 +1,9 @@
-import logging
 from typing import AsyncGenerator
-from fastapi import APIRouter, HTTPException, Request, Depends
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from models.entry import Entry, EntryCreate
 from repositories.postgres_repository import PostgresDB
 from services.entry_service import EntryService
-from models.entry import Entry, EntryCreate
-
 
 router = APIRouter()
 
