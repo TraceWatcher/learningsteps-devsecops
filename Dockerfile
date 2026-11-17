@@ -1,16 +1,19 @@
 
-FROM python:3.12-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+FROM python:3.12-alpine
 
 WORKDIR /app
 
+# Apply available Alpine security updates
+RUN apk upgrade --no-cache
+
+# Install Python dependencies
 COPY api/requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt \
-    && groupadd --system appgroup \
-    && useradd --system --gid appgroup --home-dir /app appuser
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create unprivileged user
+RUN addgroup -S appgroup \
+    && adduser -S -D -H -G appgroup appuser
 
 COPY --chown=appuser:appgroup api/ /app/
 
