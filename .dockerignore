@@ -1,0 +1,16 @@
+
+.git
+.github
+.env
+.env.*
+!.env-sample
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+test_api.py
+README.md
+infra-terraform/
+k8s-manifests/
