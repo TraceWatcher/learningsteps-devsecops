@@ -1,4 +1,3 @@
-from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from models.entry import Entry, EntryCreate
@@ -13,9 +12,9 @@ router = APIRouter()
 # TODO: Add API versioning
 # TODO: Add response caching
 
-async def get_entry_service() -> AsyncGenerator[EntryService, None]:
-    async with PostgresDB() as db:
-        yield EntryService(db)
+def get_entry_service(request: Request) -> EntryService:
+    db = PostgresDB(pool=request.app.state.db_pool)
+    return EntryService(db)
 
 @router.post("/entries")
 async def create_entry(entry_data: EntryCreate, entry_service: EntryService = Depends(get_entry_service)):

@@ -1,4 +1,3 @@
-
 name: LearningSteps Release
 
 on:
@@ -127,22 +126,49 @@ jobs:
 
           IMAGE="acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:$TAG"
 
-          COMMAND="kubectl set image deployment/learningsteps-api api=$IMAGE -n learningsteps && kubectl rollout status deployment/learningsteps-api -n learningsteps --timeout=150s"
+          # Prepare deployment files
+          mkdir -p /tmp/learningsteps-release
 
+          cp k8s-manifests/hpa.yaml \
+            /tmp/learningsteps-release/hpa.yaml
+
+          # Check that exactly one container image is defined
+          IMAGE_COUNT=$(grep -cE '^[[:space:]]*image:' \
+            k8s-manifests/deployment.yaml)
+
+          if [[ "$IMAGE_COUNT" != "1" ]]; then
+            echo "::error::Expected exactly one container image"
+            exit 1
+          fi
+
+          # Replace the old image with the tested release image
+          sed -E \
+            "s|^([[:space:]]*image: ).*|\1${IMAGE}|" \
+            k8s-manifests/deployment.yaml \
+            > /tmp/learningsteps-release/deployment.yaml
+
+          grep -F "$IMAGE" \
+            /tmp/learningsteps-release/deployment.yaml
+
+          # Apply deployment and HPA through Azure Run Command
           az aks command invoke \
             --resource-group rg-learningsteps-devsecops \
             --name aks-learningsteps \
-            --command "$COMMAND" \
+            --file /tmp/learningsteps-release/deployment.yaml \
+            --file /tmp/learningsteps-release/hpa.yaml \
+            --command "kubectl apply -f deployment.yaml -f hpa.yaml && kubectl rollout status deployment/learningsteps-api -n learningsteps --timeout=180s && kubectl get hpa -n learningsteps" \
             -o json > /tmp/deploy-result.json
 
           jq -r '.logs' /tmp/deploy-result.json
 
-          EXIT_CODE=$(jq -r '.exitCode // "missing"' /tmp/deploy-result.json)
+          EXIT_CODE=$(jq -r '.exitCode // "missing"' \
+            /tmp/deploy-result.json)
 
           if [[ "$EXIT_CODE" != "0" ]]; then
             echo "::error::AKS deployment failed: $EXIT_CODE"
             exit 1
           fi
+
 
       - name: Release completed
         env:

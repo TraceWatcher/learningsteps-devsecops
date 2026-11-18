@@ -13,45 +13,55 @@ from repositories.interface_repository import DatabaseInterface
 load_dotenv()
 
 class PostgresDB(DatabaseInterface):
+    def __init__(self, pool=None):
+        self.pool = pool
+        self._owns_pool = False
+
     @staticmethod
     def datetime_serialize(obj):
         """Convert datetime objects to ISO format for JSON serialization."""
         if isinstance(obj, datetime):
                 return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
-        
 
-    async def __aenter__(self):
+    @staticmethod
+    async def create_pool():
         password_file = os.getenv("DB_PASSWORD_FILE")
 
         if password_file:
-            # AKS: Password from Azure Key Vault CSI mount
+            # Azure AKS: Password from Key Vault CSI mount
             password = Path(password_file).read_text().strip()
 
-            self.pool = await asyncpg.create_pool(
+            return await asyncpg.create_pool(
                 host=os.environ["DB_HOST"],
                 port=5432,
                 user=os.environ["DB_USER"],
                 password=password,
                 database=os.environ["DB_NAME"],
                 ssl=ssl.create_default_context(),
-                min_size=1,
+                min_size=0,
                 max_size=3,
             )
-        else:
-            # Local Docker Compose
-            database_url = os.environ["DATABASE_URL"]
 
-            self.pool = await asyncpg.create_pool(
-                database_url,
-                min_size=1,
-                max_size=3,
-            )
+        # Local Docker Compose
+        return await asyncpg.create_pool(
+            os.environ["DATABASE_URL"],
+            min_size=0,
+            max_size=3,
+        )
+
+    async def __aenter__(self):
+        if self.pool is None:
+            self.pool = await self.create_pool()
+            self._owns_pool = True
 
         return self
-  
+
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.pool.close()
+        if self._owns_pool and self.pool is not None:
+            await self.pool.close()
+            self.pool = None
+            self._owns_pool = False
 
     async def create_entry(self, entry_data: Dict[str, Any]) -> Dict[str, Any]:
         async with self.pool.acquire() as conn:
@@ -62,15 +72,15 @@ class PostgresDB(DatabaseInterface):
             """
             entry_id = entry_data.get("id") or str(uuid.uuid4())
             data_json = json.dumps(entry_data, default=PostgresDB.datetime_serialize)
-            
+
             row = await conn.fetchrow(
-                query, 
-                entry_id, 
-                data_json, 
-                entry_data["created_at"], 
+                query,
+                entry_id,
+                data_json,
+                entry_data["created_at"],
                 entry_data["updated_at"]
             )
-            
+
             # Return a clean entry format without duplication
             if row:
                 data = json.loads(row["data"])
@@ -100,12 +110,12 @@ class PostgresDB(DatabaseInterface):
                     "updated_at": row["updated_at"]
                 })
             return entries
-        
+
     async def get_entry(self, entry_id: str) -> Dict[str, Any] | None:
         async with self.pool.acquire() as conn:
             query = "SELECT * FROM entries WHERE id = $1"
             row = await conn.fetchrow(query, entry_id)
-            
+
             if row:
                 data = json.loads(row["data"])
                 return {
@@ -117,7 +127,7 @@ class PostgresDB(DatabaseInterface):
                     "updated_at": row["updated_at"]
                 }
             return None
-   
+
     async def update_entry(self, entry_id: str, updated_data: Dict[str, Any]) -> None:
         updated_at = datetime.now(timezone.utc)
         updated_data["id"] = entry_id
@@ -127,7 +137,7 @@ class PostgresDB(DatabaseInterface):
 
         async with self.pool.acquire() as conn:
             query = """
-            UPDATE entries 
+            UPDATE entries
             SET data = $2, updated_at = $3
             WHERE id = $1
             """
