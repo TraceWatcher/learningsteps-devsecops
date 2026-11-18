@@ -1,0 +1,79 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-smoke-test
+  namespace: learningsteps
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: learningsteps-api
+      restartPolicy: Never
+      containers:
+        - name: ai-test
+          image: python:3.12-slim
+          env:
+            - name: AZURE_OPENAI_ENDPOINT
+              value: "https://oai-learningsteps-305c3ba6.openai.azure.com/"
+            - name: AZURE_OPENAI_DEPLOYMENT
+              value: "learningsteps-summary"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              pip install --quiet openai azure-identity
+
+              python - <<'PY'
+              import os
+              from openai import OpenAI
+              from azure.identity import (
+                  DefaultAzureCredential,
+                  get_bearer_token_provider,
+              )
+
+              credential = DefaultAzureCredential(
+                  exclude_interactive_browser_credential=True
+              )
+
+              token_provider = get_bearer_token_provider(
+                  credential,
+                  "https://cognitiveservices.azure.com/.default",
+              )
+
+              endpoint = os.environ["AZURE_OPENAI_ENDPOINT"]
+
+              client = OpenAI(
+                  base_url=endpoint.rstrip("/") + "/openai/v1/",
+                  api_key=token_provider,
+                  timeout=30.0,
+              )
+
+              response = client.chat.completions.create(
+                  model=os.environ["AZURE_OPENAI_DEPLOYMENT"],
+                  messages=[
+                      {
+                          "role": "system",
+                          "content": "Antworte kurz auf Deutsch.",
+                      },
+                      {
+                          "role": "user",
+                          "content": (
+                              "Fasse zusammen: Ich habe Terraform "
+                              "und Kubernetes gelernt und eine "
+                              "CI/CD-Pipeline aufgebaut."
+                          ),
+                      },
+                  ],
+                  max_completion_tokens=120,
+              )
+
+              print("AI RESPONSE:")
+              print(response.choices[0].message.content)
+              print("MODEL CALL SUCCESSFUL")
+              PY

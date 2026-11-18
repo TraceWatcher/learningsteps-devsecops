@@ -152,3 +152,19 @@ class PostgresDB(DatabaseInterface):
         async with self.pool.acquire() as conn:
             query = "DELETE FROM entries"
             await conn.execute(query)
+
+    async def get_entries_for_summary(self, limit: int = 21):
+        """Load a bounded set of notes for AI summarization."""
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT data
+                FROM entries
+                ORDER BY created_at DESC, id DESC
+                LIMIT $1
+                """,
+                limit,
+            )
+
+        return [json.loads(row["data"]) for row in rows]

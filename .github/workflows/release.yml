@@ -132,6 +132,9 @@ jobs:
           cp k8s-manifests/hpa.yaml \
             /tmp/learningsteps-release/hpa.yaml
 
+          cp k8s-manifests/configmap.yaml \
+            /tmp/learningsteps-release/configmap.yaml
+
           # Check that exactly one container image is defined
           IMAGE_COUNT=$(grep -cE '^[[:space:]]*image:' \
             k8s-manifests/deployment.yaml)
@@ -156,7 +159,8 @@ jobs:
             --name aks-learningsteps \
             --file /tmp/learningsteps-release/deployment.yaml \
             --file /tmp/learningsteps-release/hpa.yaml \
-            --command "kubectl apply -f deployment.yaml -f hpa.yaml && kubectl rollout status deployment/learningsteps-api -n learningsteps --timeout=180s && kubectl get hpa -n learningsteps" \
+            --file /tmp/learningsteps-release/configmap.yaml \
+            --command "kubectl apply -f configmap.yaml && kubectl apply -f deployment.yaml -f hpa.yaml && kubectl rollout status deployment/learningsteps-api -n learningsteps --timeout=180s && kubectl get hpa -n learningsteps" \
             -o json > /tmp/deploy-result.json
 
           jq -r '.logs' /tmp/deploy-result.json

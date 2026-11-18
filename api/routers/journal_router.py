@@ -1,7 +1,10 @@
+import logging
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from models.entry import Entry, EntryCreate
 from repositories.postgres_repository import PostgresDB
+from services.ai_summary_service import AISummaryService
 from services.entry_service import EntryService
 
 router = APIRouter()
@@ -15,6 +18,37 @@ router = APIRouter()
 def get_entry_service(request: Request) -> EntryService:
     db = PostgresDB(pool=request.app.state.db_pool)
     return EntryService(db)
+
+logger = logging.getLogger("journal")
+
+@router.post("/entries/summary", tags=["AI"])
+async def summarize_entries(request: Request):
+    """Generate an AI summary of demo notes."""
+
+    if os.getenv("AI_SUMMARY_ENABLED", "false").lower() != "true":
+        raise HTTPException(
+            status_code=404,
+            detail="Not found",
+        )
+
+    db = PostgresDB(pool=request.app.state.db_pool)
+    service = AISummaryService(db)
+
+    try:
+        return await service.summarize()
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
+
+    except Exception:
+        logger.exception("AI summary generation failed")
+        raise HTTPException(
+            status_code=502,
+            detail="AI summary temporarily unavailable",
+        ) from None
 
 @router.post("/entries")
 async def create_entry(entry_data: EntryCreate, entry_service: EntryService = Depends(get_entry_service)):
