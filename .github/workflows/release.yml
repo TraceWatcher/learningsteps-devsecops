@@ -1,0 +1,150 @@
+
+name: LearningSteps Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: learningsteps-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build Scan Push Deploy
+    runs-on: ubuntu-24.04
+    environment: production
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Invalid release tag: $TAG"
+            exit 1
+          fi
+
+          git fetch origin main
+
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Release commit is not on main"
+            exit 1
+          fi
+
+          echo "Release validated: $TAG"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            api/requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Ruff
+        run: ruff check api/ tests/
+
+      - name: Pytest
+        run: python -m pytest tests/ -v
+
+      - name: Scan secrets
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          exit-code: "1"
+
+      - name: Scan Terraform
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: infra-terraform/
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Build Docker image
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          docker build \
+            -t acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:"$TAG" \
+            .
+
+      - name: Scan Docker image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:${{ github.ref_name }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: false
+
+      - name: Azure Login via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Push verified image to ACR
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          az acr login --name acrlearningstepsbff17e9a
+
+          docker push \
+            acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:"$TAG"
+
+      - name: Deploy to AKS
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          IMAGE="acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:$TAG"
+
+          COMMAND="kubectl set image deployment/learningsteps-api api=$IMAGE -n learningsteps && kubectl rollout status deployment/learningsteps-api -n learningsteps --timeout=150s"
+
+          az aks command invoke \
+            --resource-group rg-learningsteps-devsecops \
+            --name aks-learningsteps \
+            --command "$COMMAND" \
+            -o json > /tmp/deploy-result.json
+
+          jq -r '.logs' /tmp/deploy-result.json
+
+          EXIT_CODE=$(jq -r '.exitCode // "missing"' /tmp/deploy-result.json)
+
+          if [[ "$EXIT_CODE" != "0" ]]; then
+            echo "::error::AKS deployment failed: $EXIT_CODE"
+            exit 1
+          fi
+
+      - name: Release completed
+        env:
+          TAG: ${{ github.ref_name }}
+        run: echo "LearningSteps $TAG successfully deployed"
