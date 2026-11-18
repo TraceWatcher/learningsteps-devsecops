@@ -1,33 +1,71 @@
-
 <!doctype html>
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0" />
-    <title>LearningSteps</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LearningSteps – Lernjournal</title>
   </head>
   <body>
-    <main>
-      <h1>LearningSteps</h1>
-      <p>Dein persönliches DevSecOps-Lernjournal</p>
+    <main class="container">
+      <header>
+        <h1>LearningSteps</h1>
+        <p>Dein persönliches DevSecOps-Lernjournal</p>
+      </header>
 
-      <p id="status">Initialisiere Anmeldung ...</p>
+      <section class="panel">
+        <p id="status">Initialisiere Anmeldung ...</p>
 
-      <button id="login" hidden>
-        Mit Microsoft anmelden
-      </button>
+        <div class="actions">
+          <button id="login" hidden>Mit Microsoft anmelden</button>
+          <button id="load" hidden>Notizen aktualisieren</button>
+          <button id="logout" hidden>Abmelden</button>
+        </div>
+      </section>
 
-      <button id="load" hidden>
-        Meine Notizen laden
-      </button>
+      <section id="journal" hidden>
+        <section class="panel">
+          <h2>Neue Lernnotiz</h2>
 
-      <button id="logout" hidden>
-        Abmelden
-      </button>
+          <form id="entry-form">
+            <label for="work">Was habe ich heute gemacht?</label>
+            <textarea id="work" required minlength="3" maxlength="256"></textarea>
 
-      <h2>Meine Notizen</h2>
-      <pre id="notes"></pre>
+            <label for="struggle">Welche Schwierigkeiten gab es?</label>
+            <textarea id="struggle" required minlength="3" maxlength="256"></textarea>
+
+            <label for="intention">Was möchte ich als Nächstes lernen?</label>
+            <textarea id="intention" required minlength="3" maxlength="256"></textarea>
+
+            <button type="submit" id="save">Notiz speichern</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Meine Notizen</h2>
+          <div id="notes"></div>
+
+        <section class="panel">
+          <h2>KI-Lernzusammenfassung</h2>
+
+          <p>
+            Lass deine persönlichen Lernnotizen von
+            Microsoft Foundry zusammenfassen.
+          </p>
+
+          <button id="summarize" type="button">
+            Meine Notizen zusammenfassen
+          </button>
+
+          <p id="summary-status" role="status" aria-live="polite"></p>
+
+          <article id="summary-result" class="summary-box" hidden>
+            <h3>Deine Zusammenfassung</h3>
+            <p id="summary-text"></p>
+            <p id="summary-meta"></p>
+          </article>
+        </section>
+
+      </section>
     </main>
 
     <script type="module" src="/src/main.js"></script>
