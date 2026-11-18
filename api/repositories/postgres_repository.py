@@ -63,107 +63,165 @@ class PostgresDB(DatabaseInterface):
             self.pool = None
             self._owns_pool = False
 
-    async def create_entry(self, entry_data: Dict[str, Any]) -> Dict[str, Any]:
-        async with self.pool.acquire() as conn:
-            query = """
-            INSERT INTO entries (id, data, created_at, updated_at)
-            VALUES ($1, $2, $3, $4)
-            RETURNING *
-            """
-            entry_id = entry_data.get("id") or str(uuid.uuid4())
-            data_json = json.dumps(entry_data, default=PostgresDB.datetime_serialize)
 
+    @staticmethod
+    def _format_entry(row) -> Dict[str, Any]:
+        """Convert a database row into an API entry."""
+        data = json.loads(row["data"])
+
+        return {
+            "id": row["id"],
+            "work": data.get("work", ""),
+            "struggle": data.get("struggle", ""),
+            "intention": data.get("intention", ""),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    @staticmethod
+    def _owner_uuid(owner_id: str) -> uuid.UUID:
+        """Validate and convert a user object ID."""
+        return uuid.UUID(str(owner_id))
+
+    async def create_entry(
+        self, entry_data: Dict[str, Any], owner_id: str
+    ) -> Dict[str, Any]:
+        owner = self._owner_uuid(owner_id)
+        entry_id = entry_data.get("id") or str(uuid.uuid4())
+        data_json = json.dumps(
+            entry_data, default=self.datetime_serialize
+        )
+
+        async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
-                query,
+                """
+                INSERT INTO entries
+                    (id, owner_id, data, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING *
+                """,
                 entry_id,
+                owner,
                 data_json,
                 entry_data["created_at"],
-                entry_data["updated_at"]
+                entry_data["updated_at"],
             )
 
-            # Return a clean entry format without duplication
-            if row:
-                data = json.loads(row["data"])
-                return {
-                    "id": row["id"],
-                    "work": data.get("work", ""),
-                    "struggle": data.get("struggle", ""),
-                    "intention": data.get("intention", ""),
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"]
-                }
-            return {}
+        return self._format_entry(row)
 
-    async def get_all_entries(self) -> List[Dict[str, Any]]:
+    async def get_all_entries(
+        self, owner_id: str
+    ) -> List[Dict[str, Any]]:
+        owner = self._owner_uuid(owner_id)
+
         async with self.pool.acquire() as conn:
-            query = "SELECT * FROM entries"
-            rows = await conn.fetch(query)
-            entries = []
-            for row in rows:
-                data = json.loads(row["data"])
-                entries.append({
-                    "id": row["id"],
-                    "work": data.get("work", ""),
-                    "struggle": data.get("struggle", ""),
-                    "intention": data.get("intention", ""),
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"]
-                })
-            return entries
+            rows = await conn.fetch(
+                """
+                SELECT *
+                FROM entries
+                WHERE owner_id = $1
+                ORDER BY created_at DESC, id DESC
+                """,
+                owner,
+            )
 
-    async def get_entry(self, entry_id: str) -> Dict[str, Any] | None:
+        return [self._format_entry(row) for row in rows]
+
+    async def get_entry(
+        self, entry_id: str, owner_id: str
+    ) -> Dict[str, Any] | None:
+        owner = self._owner_uuid(owner_id)
+
         async with self.pool.acquire() as conn:
-            query = "SELECT * FROM entries WHERE id = $1"
-            row = await conn.fetchrow(query, entry_id)
+            row = await conn.fetchrow(
+                """
+                SELECT *
+                FROM entries
+                WHERE id = $1 AND owner_id = $2
+                """,
+                entry_id,
+                owner,
+            )
 
-            if row:
-                data = json.loads(row["data"])
-                return {
-                    "id": row["id"],
-                    "work": data.get("work", ""),
-                    "struggle": data.get("struggle", ""),
-                    "intention": data.get("intention", ""),
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"]
-                }
-            return None
+        return self._format_entry(row) if row else None
 
-    async def update_entry(self, entry_id: str, updated_data: Dict[str, Any]) -> None:
+    async def update_entry(
+        self,
+        entry_id: str,
+        updated_data: Dict[str, Any],
+        owner_id: str,
+    ) -> Dict[str, Any] | None:
+        owner = self._owner_uuid(owner_id)
         updated_at = datetime.now(timezone.utc)
-        updated_data["id"] = entry_id
-        updated_data["updated_at"] = updated_at
 
-        data_json = json.dumps(updated_data, default=PostgresDB.datetime_serialize)
+        data_json = json.dumps(
+            updated_data, default=self.datetime_serialize
+        )
 
         async with self.pool.acquire() as conn:
-            query = """
-            UPDATE entries
-            SET data = $2, updated_at = $3
-            WHERE id = $1
-            """
-            await conn.execute(query, entry_id, data_json, updated_at)
+            row = await conn.fetchrow(
+                """
+                UPDATE entries
+                SET data = $3, updated_at = $4
+                WHERE id = $1 AND owner_id = $2
+                RETURNING *
+                """,
+                entry_id,
+                owner,
+                data_json,
+                updated_at,
+            )
 
-    async def delete_entry(self, entry_id: str) -> None:
+        return self._format_entry(row) if row else None
+
+    async def delete_entry(
+        self, entry_id: str, owner_id: str
+    ) -> bool:
+        owner = self._owner_uuid(owner_id)
+
         async with self.pool.acquire() as conn:
-            query = "DELETE FROM entries WHERE id = $1"
-            await conn.execute(query, entry_id)
+            row = await conn.fetchrow(
+                """
+                DELETE FROM entries
+                WHERE id = $1 AND owner_id = $2
+                RETURNING id
+                """,
+                entry_id,
+                owner,
+            )
 
-    async def delete_all_entries(self) -> None:
+        return row is not None
+
+    async def delete_all_entries(self, owner_id: str) -> int:
+        owner = self._owner_uuid(owner_id)
+
         async with self.pool.acquire() as conn:
-            query = "DELETE FROM entries"
-            await conn.execute(query)
+            result = await conn.execute(
+                """
+                DELETE FROM entries
+                WHERE owner_id = $1
+                """,
+                owner,
+            )
 
-    async def get_entries_for_summary(self, limit: int = 21):
-        """Load a bounded set of notes for AI summarization."""
+        return int(result.rsplit(" ", 1)[-1])
+
+    async def get_entries_for_summary(
+        self, owner_id: str, limit: int = 21
+    ) -> List[Dict[str, Any]]:
+        """Fetch only this user's notes for AI summarization."""
+        owner = self._owner_uuid(owner_id)
 
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
                 SELECT data
                 FROM entries
+                WHERE owner_id = $1
                 ORDER BY created_at DESC, id DESC
-                LIMIT $1
+                LIMIT $2
                 """,
+                owner,
                 limit,
             )
 

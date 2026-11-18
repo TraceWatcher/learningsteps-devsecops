@@ -1,8 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class EntryCreate(BaseModel):
@@ -62,11 +62,11 @@ class Entry(BaseModel):
         description="What will you study/work on tomorrow?"
     )
     created_at: Optional[datetime] = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp when the entry was created."
     )
     updated_at: Optional[datetime] = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp when the entry was last updated."
     )
     
@@ -86,8 +86,31 @@ class Entry(BaseModel):
             raise ValueError('Field must be at least 3 characters long')
         return v
 
-    model_config = {
-        "json_encoders": {
-            datetime: lambda v: v.isoformat()
-        }
-    }
+class EntryUpdate(BaseModel):
+    """Validate partial updates to a journal entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    work: str | None = Field(default=None, max_length=256)
+    struggle: str | None = Field(default=None, max_length=256)
+    intention: str | None = Field(default=None, max_length=256)
+
+    @field_validator("work", "struggle", "intention")
+    @classmethod
+    def validate_field(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("Field cannot be null")
+
+        value = value.strip()
+
+        if len(value) < 3:
+            raise ValueError("Field must contain at least 3 characters")
+
+        return value
+
+    @model_validator(mode="after")
+    def validate_not_empty(self):
+        if not self.model_fields_set:
+            raise ValueError("At least one field must be provided")
+
+        return self

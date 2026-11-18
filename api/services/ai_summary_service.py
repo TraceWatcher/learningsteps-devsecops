@@ -31,9 +31,12 @@ class AISummaryService:
     def __init__(self, db):
         self.db = db
 
-    async def summarize(self):
+    async def summarize(self, owner_id: str):
+        """Summarize only notes owned by the authenticated user."""
+
         entries = await self.db.get_entries_for_summary(
-            limit=MAX_NOTES + 1
+            owner_id=owner_id,
+            limit=MAX_NOTES + 1,
         )
 
         if not entries:
