@@ -1,0 +1,51 @@
+
+name: LearningSteps Azure OIDC Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oidc-test:
+    name: Verify Azure OIDC Login
+    runs-on: ubuntu-24.04
+
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    environment: production
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Azure Login via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Azure identity
+        run: |
+          az account show \
+            --query "{Subscription:id,Tenant:tenantId}" \
+            -o table
+
+      - name: Verify AKS access
+        run: |
+          az aks show \
+            --resource-group rg-learningsteps-devsecops \
+            --name aks-learningsteps \
+            --query "{Name:name,State:provisioningState}" \
+            -o table
+
+      - name: Test AKS Run Command
+        run: |
+          az aks command invoke \
+            --resource-group rg-learningsteps-devsecops \
+            --name aks-learningsteps \
+            --command "kubectl get deployment learningsteps-api -n learningsteps" \
+            --query logs -o tsv
