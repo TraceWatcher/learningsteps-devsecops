@@ -6,4 +6,4 @@ sqlalchemy
 psycopg2-binary
 asyncpg
 openai>=1.106.0
-azure-identity
+azure-identityPyJWT[crypto]>=2.10,<3
