@@ -1,0 +1,35 @@
+
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0" />
+    <title>LearningSteps</title>
+  </head>
+  <body>
+    <main>
+      <h1>LearningSteps</h1>
+      <p>Dein persönliches DevSecOps-Lernjournal</p>
+
+      <p id="status">Initialisiere Anmeldung ...</p>
+
+      <button id="login" hidden>
+        Mit Microsoft anmelden
+      </button>
+
+      <button id="load" hidden>
+        Meine Notizen laden
+      </button>
+
+      <button id="logout" hidden>
+        Abmelden
+      </button>
+
+      <h2>Meine Notizen</h2>
+      <pre id="notes"></pre>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
