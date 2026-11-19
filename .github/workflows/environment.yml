@@ -76,15 +76,29 @@ jobs:
           }
 
           vm_state() {
-            az vm show -g "$RG" -n "$VM" -d \
-              --query powerState -o tsv
+            az vm get-instance-view \
+              --resource-group "$RG" \
+              --name "$VM" \
+              --query "instanceView.statuses[?starts_with(code, 'PowerState/')].code | [0]" \
+              -o tsv
           }
 
           show_status() {
+            local aks pg vm
+
+            aks=$(aks_state) || return 1
+            pg=$(pg_state) || return 1
+            vm=$(vm_state) || return 1
+
+            [[ -n "$aks" && -n "$pg" && -n "$vm" ]] || {
+              echo "::error::Mindestens ein Ressourcenstatus ist leer"
+              return 1
+            }
+
             echo "=== LearningSteps Environment ==="
-            echo "AKS:        $(aks_state)"
-            echo "PostgreSQL: $(pg_state)"
-            echo "VM:         $(vm_state)"
+            echo "AKS:        $aks"
+            echo "PostgreSQL: $pg"
+            echo "VM:         $vm"
           }
 
           case "$ACTION" in
@@ -158,7 +172,7 @@ jobs:
               echo "=== Deallocating maintenance VM ==="
               VM_STATE=$(vm_state)
 
-              if [[ "$VM_STATE" != "VM deallocated" ]]; then
+              if [[ "$VM_STATE" != "PowerState/deallocated" ]]; then
                 az vm deallocate \
                   -g "$RG" -n "$VM" -o none
               fi
