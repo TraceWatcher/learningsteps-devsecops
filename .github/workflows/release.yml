@@ -110,6 +110,7 @@ jobs:
       - name: Scan secrets
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: "v0.72.0"
           scan-type: fs
           scan-ref: .
           scanners: secret
@@ -118,6 +119,7 @@ jobs:
       - name: Scan Terraform
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: "v0.72.0"
           scan-type: config
           scan-ref: infra-terraform/
           severity: HIGH,CRITICAL
@@ -134,6 +136,7 @@ jobs:
       - name: Scan Docker image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: "v0.72.0"
           scan-type: image
           image-ref: acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:${{ github.ref_name }}
           scanners: vuln
