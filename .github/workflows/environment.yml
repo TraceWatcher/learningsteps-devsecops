@@ -186,3 +186,57 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Verify application after start
+        if: inputs.action == 'start'
+        shell: bash
+        env:
+          APP_URL: https://learningsteps.6aff4a07cf83170001eabf87.westeurope.aksapp.io
+        run: |
+          set -euo pipefail
+
+          echo "Checking HTTPS application readiness"
+
+          ready=false
+
+          for attempt in {1..30}; do
+            if curl -fsS \
+              --connect-timeout 5 \
+              --max-time 10 \
+              "$APP_URL/api/health/ready" \
+              | jq -e '.status == "ready" and .database == "connected"' \
+              >/dev/null; then
+              ready=true
+              break
+            fi
+
+            echo "Application not ready (attempt $attempt/30)"
+            sleep 10
+          done
+
+          if [[ "$ready" != "true" ]]; then
+            echo "::error::Application readiness check failed"
+            exit 1
+          fi
+
+          frontend_status=$(curl -sS -o /dev/null \
+            --connect-timeout 5 --max-time 15 \
+            -w '%{http_code}' "$APP_URL/")
+
+          auth_status=$(curl -sS -o /dev/null \
+            --connect-timeout 5 --max-time 15 \
+            -w '%{http_code}' "$APP_URL/api/entries")
+
+          [[ "$frontend_status" == "200" ]] || {
+            echo "::error::Frontend returned HTTP $frontend_status"
+            exit 1
+          }
+
+          [[ "$auth_status" == "401" ]] || {
+            echo "::error::Unauthenticated API returned HTTP $auth_status"
+            exit 1
+          }
+
+          echo "PASS: Frontend HTTP 200"
+          echo "PASS: Database readiness verified"
+          echo "PASS: Authentication enforcement HTTP 401"
