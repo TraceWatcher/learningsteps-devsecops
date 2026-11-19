@@ -23,7 +23,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def local_database_url():
-    """Use only the local Docker PostgreSQL instance."""
+    """Use an explicitly configured CI database or local Docker PostgreSQL."""
+
+    ci_dsn = os.getenv("CI_DATABASE_URL")
+    if ci_dsn:
+        return ci_dsn
+
     values = dotenv_values(PROJECT_ROOT / ".env")
 
     user = values.get("POSTGRES_USER")
@@ -31,6 +36,11 @@ def local_database_url():
     database = values.get("POSTGRES_DB")
 
     if not all([user, password, database]):
+        if os.getenv("RUN_DB_INTEGRATION") == "1":
+            pytest.fail(
+                "Integrationstest aktiviert, aber PostgreSQL-Zugangsdaten fehlen"
+            )
+
         pytest.skip("Local PostgreSQL credentials missing in .env")
 
     return (
