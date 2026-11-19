@@ -23,7 +23,7 @@ spec:
 
       containers:
         - name: api
-          image: acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:v0.2.0
+          image: acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:v0.6.0
           imagePullPolicy: IfNotPresent
 
           ports:
