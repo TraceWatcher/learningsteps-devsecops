@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: learningsteps-web-ingress
+  namespace: learningsteps
+spec:
+  podSelector:
+    matchLabels:
+      app: learningsteps-web
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: learningsteps-gateway
+      ports:
+        - protocol: TCP
+          port: 8080

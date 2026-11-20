@@ -69,6 +69,20 @@ spec:
               cpu: "500m"
               memory: "512Mi"
 
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: false
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+
       volumes:
         - name: keyvault-secrets
           csi:
