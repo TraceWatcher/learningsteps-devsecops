@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-dotenv
+aiohttp
+sqlalchemy
+psycopg2-binary
+asyncpg
+openai==3.55.1
+azure-identity
+PyJWT[crypto]>=2.10,<3

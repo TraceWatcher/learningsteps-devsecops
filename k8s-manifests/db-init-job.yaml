@@ -1,4 +1,3 @@
-
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -15,10 +14,22 @@ spec:
     spec:
       serviceAccountName: learningsteps-api
       restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
 
       containers:
         - name: postgres-init
           image: postgres:16-alpine
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
 
           command:
             - /bin/sh
@@ -44,6 +55,10 @@ spec:
               value: "lsadmin"
             - name: PGDATABASE
               value: "learning_journal"
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
 
           volumeMounts:
             - name: keyvault-secrets
@@ -53,6 +68,9 @@ spec:
             - name: database-schema
               mountPath: /sql
               readOnly: true
+
+            - name: postgres-tmp
+              mountPath: /tmp
 
       volumes:
         - name: keyvault-secrets
@@ -65,3 +83,7 @@ spec:
         - name: database-schema
           configMap:
             name: learningsteps-db-schema
+
+        - name: postgres-tmp
+          emptyDir:
+            sizeLimit: 64Mi

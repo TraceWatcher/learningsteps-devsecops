@@ -1,0 +1,5 @@
+misconfigurations:
+  - id: KSV-0109
+    paths:
+      - "configmap.yaml"
+    statement: "DB_PASSWORD_FILE contains only the path to a Key Vault CSI-mounted secret, not a credential."

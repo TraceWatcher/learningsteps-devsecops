@@ -33,10 +33,22 @@ spec:
             - configMapRef:
                 name: learningsteps-config
 
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: TMPDIR
+              value: /tmp
+            - name: HOME
+              value: /tmp
+            - name: XDG_CACHE_HOME
+              value: /tmp/.cache
+
           volumeMounts:
             - name: keyvault-secrets
               mountPath: /mnt/secrets
               readOnly: true
+            - name: api-tmp
+              mountPath: /tmp
 
           startupProbe:
             httpGet:
@@ -74,7 +86,7 @@ spec:
             capabilities:
               drop:
                 - ALL
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
 
       securityContext:
         runAsNonRoot: true
@@ -90,3 +102,6 @@ spec:
             readOnly: true
             volumeAttributes:
               secretProviderClass: learningsteps-keyvault
+        - name: api-tmp
+          emptyDir:
+            sizeLimit: 64Mi

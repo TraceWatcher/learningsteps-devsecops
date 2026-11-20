@@ -13,21 +13,45 @@ spec:
     spec:
       serviceAccountName: learningsteps-api
       restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: ai-test
           image: python:3.12-slim
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
           env:
             - name: AZURE_OPENAI_ENDPOINT
               value: "https://oai-learningsteps-305c3ba6.openai.azure.com/"
             - name: AZURE_OPENAI_DEPLOYMENT
               value: "learningsteps-summary"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONPATH
+              value: /tmp/python-packages
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: XDG_CACHE_HOME
+              value: /tmp/.cache
           command:
             - /bin/sh
             - -c
             - |
               set -e
 
-              pip install --quiet openai azure-identity
+              pip install --quiet --no-cache-dir \
+                --target /tmp/python-packages \
+                -r /requirements/requirements.txt
 
               python - <<'PY'
               import os
@@ -77,3 +101,16 @@ spec:
               print(response.choices[0].message.content)
               print("MODEL CALL SUCCESSFUL")
               PY
+          volumeMounts:
+            - name: ai-tmp
+              mountPath: /tmp
+            - name: ai-requirements
+              mountPath: /requirements
+              readOnly: true
+      volumes:
+        - name: ai-tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: ai-requirements
+          configMap:
+            name: ai-test-requirements

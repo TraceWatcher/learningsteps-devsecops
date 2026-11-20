@@ -43,7 +43,14 @@ spec:
             capabilities:
               drop:
                 - ALL
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: nginx-tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-tmp
+          emptyDir:
+            sizeLimit: 64Mi
       securityContext:
         runAsNonRoot: true
         runAsUser: 101

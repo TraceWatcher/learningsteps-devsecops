@@ -105,6 +105,17 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
 
+      - name: Kubernetes security scanning
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: "v0.76.1"
+          scan-type: config
+          scan-ref: k8s-manifests/
+          scanners: misconfig
+          severity: HIGH,CRITICAL
+          trivyignores: .trivyignore.yaml
+          exit-code: "1"
+
   container:
     name: Docker Build & Vulnerability Scan
     runs-on: ubuntu-24.04

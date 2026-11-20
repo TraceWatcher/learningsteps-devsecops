@@ -7,6 +7,7 @@ data:
   DB_HOST: "psql-learningsteps-305c3ba6.postgres.database.azure.com"
   DB_USER: "lsadmin"
   DB_NAME: "learning_journal"
+  # Path to Key Vault CSI-mounted secret; no credential stored here.
   DB_PASSWORD_FILE: "/mnt/secrets/postgres-admin-password"
   AZURE_OPENAI_ENDPOINT: "https://oai-learningsteps-305c3ba6.openai.azure.com/"
   AZURE_OPENAI_DEPLOYMENT: "learningsteps-summary"
