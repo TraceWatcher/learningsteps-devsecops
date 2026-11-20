@@ -1,173 +1,166 @@
-# LearningSteps API
+# LearningSteps – Azure DevSecOps & AI Security
 
-Welcome to LearningSteps! LearningSteps is a Python FastAPI + PostgreSQL application that helps people track their daily learning journey. This is a reference implementation, deploy this to the cloud!
+**Cloud-native Lernjournal-Anwendung mit Microsoft Azure, Kubernetes, Terraform, GitHub Actions und KI-gestützter Lernzusammenfassung.**
 
+## Projektübersicht
 
-## Table of Contents
+LearningSteps ist ein DevSecOps-Lernprojekt, bei dem eine bestehende FastAPI-/PostgreSQL-Anwendung zu einer cloudnativen, authentifizierten Webanwendung auf Microsoft Azure weiterentwickelt wurde.
 
-- [🚀 Getting Started](#-getting-started)
-- [⚙️ API Endpoints](#-api-endpoints)
-- [☁️ Azure CLI for Deployment](#️-azure-cli-for-deployment)
-- [📊 Data Schema](#-data-schema)
-- [�️ Explore Your Database (Optional)](#️-explore-your-database-optional)
-- [🔧 Troubleshooting](#-troubleshooting)
+Der Fokus liegt nicht nur auf der Bereitstellung der Anwendung, sondern insbesondere auf der Integration von Sicherheitsmaßnahmen in Architektur, Infrastruktur, Container, CI/CD-Pipeline und laufenden Betrieb.
 
-## 🚀 Getting Started
+Das Projekt wurde im Rahmen der Cybersecurity-Weiterbildung entwickelt.
 
-### Prerequisites
+### Implementierte Funktionen
 
-- Git installed on your machine
-- Docker Desktop installed and running
-- VS Code with the Dev Containers extension
+- Lernnotizen erstellen, anzeigen, bearbeiten und löschen
+- Anmeldung über Microsoft Entra ID
+- Benutzerbezogene Speicherung von Lernnotizen
+- KI-gestützte Zusammenfassung eigener Lernnotizen über Azure AI
+- Bereitstellung über einen öffentlichen HTTPS-Endpunkt
+- Automatisierte Build-, Test- und Sicherheitsprüfungen
 
-### 1. Clone the Repository
+## Technologie-Stack
 
-1. **Clone this repository** to your local machine:
+| Bereich | Technologien |
+|---|---|
+| Cloud | Microsoft Azure |
+| Container-Orchestrierung | Azure Kubernetes Service (AKS) |
+| Infrastructure as Code | Terraform |
+| Backend | Python, FastAPI |
+| Frontend | JavaScript, MSAL, Nginx |
+| Datenbank | Azure Database for PostgreSQL |
+| Authentifizierung | Microsoft Entra ID, OAuth 2.0 / JWT |
+| Secrets | Azure Key Vault, Secrets Store CSI Driver |
+| KI | Azure AI, OpenAI Python SDK |
+| CI/CD | GitHub Actions |
+| Security Scanning | Trivy, Ruff, Kubeconform |
+| Monitoring | Azure Monitor, Container Insights, Log Analytics |
 
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/learningsteps.git
-   ```
+## Architektur
 
-1. Move into the project directory:
+Die Anwendung besteht aus mehreren Komponenten:
 
-   ```bash
-   cd learningsteps
-   ```
+1. Benutzer greifen über HTTPS auf das Web-Frontend zu.
+2. Das Frontend verwendet Microsoft Entra ID zur Anmeldung.
+3. Ein Istio-basiertes Kubernetes Gateway leitet Anfragen an die entsprechenden Services weiter.
+4. Die FastAPI-Anwendung validiert Zugriffstokens und verarbeitet benutzerbezogene Anfragen.
+5. Lernnotizen werden in Azure Database for PostgreSQL gespeichert.
+6. Für die KI-Zusammenfassung ruft die API ein Azure-AI-Modell auf.
+7. Sensible Zugangsdaten werden über Azure Key Vault bereitgestellt.
 
-1. **Open in VS Code**:
+Die Azure-Infrastruktur wird mit Terraform verwaltet.
 
-   ```bash
-   code .
-   ```
+## Sicherheitskonzept
 
-### 2. Configure Your Environment (.env)
+### Identity & Access Management
 
-Environment variables live in a `.env` file (which is **git-ignored** so you don't accidentally commit secrets). This repo ships with a template named `.env-sample`.
+- Microsoft Entra ID für die Benutzeranmeldung
+- JWT-basierte Authentifizierung der API
+- Benutzerbezogene Zugriffskontrolle für Lernnotizen
+- Azure Workload Identity für die Kommunikation mit Azure-Diensten
+- Rollenbasierte Berechtigungen statt fest eingebetteter Azure-API-Schlüssel
 
-1. Copy the sample file to create your real `.env`:
+### Kubernetes Security
 
-   ```bash
-   cp .env-sample .env
-   ```
+- Ausführung der Anwendung als nicht privilegierter Benutzer
+- Schreibgeschütztes Root-Dateisystem
+- Deaktivierte Privilege Escalation
+- Entfernte Linux Capabilities
+- Seccomp-Profil `RuntimeDefault`
+- NetworkPolicies zur Beschränkung eingehender Verbindungen
+- Readiness- und Liveness-Probes
 
-### 3. Set Up Your Development Environment
+### Secret Management
 
-1. **Install the Dev Containers extension** in VS Code (if not already installed)
-2. **Reopen in container**: When VS Code detects the `.devcontainer` folder, click "Reopen in Container"
-   - Or use Command Palette (`Cmd/Ctrl + Shift + P`): `Dev Containers: Reopen in Container`
-3. **Wait for setup**: The API container will automatically install Python, dependencies, and configure your environment.
-   The PostgreSQL Database container will also automatically be created.
+- Azure Key Vault zur Verwaltung sensibler Konfigurationswerte
+- Bereitstellung von Secrets über den Secrets Store CSI Driver
+- Keine produktiven Zugangsdaten im Kubernetes-ConfigMap-Manifest
 
-### 4. Verify the PostgreSQL Database Is Running
+### CI/CD Security
 
-In a terminal outside of VS Code, run:
+Die GitHub-Actions-Pipeline beinhaltet automatisierte Prüfungen für:
 
-   ```bash
-      docker ps
-   ```
+- Python-Codequalität und Tests
+- Sicherheitsprobleme in Terraform- und Kubernetes-Manifests
+- Secret Scanning
+- Container-Schwachstellen
+- Kubernetes-Schema-Validierung
+- Container-Build
 
-You should see the postgres service running.
+Die Sicherheitsprüfungen dienen als Quality Gates vor einer erfolgreichen Pipeline-Ausführung.
 
-### 5. Run the API
+## KI-gestützte Lernzusammenfassung
 
-Make sure you are in the root of your project in the terminal (inside VS Code, while container is running):
+Die Anwendung kann Lernnotizen eines authentifizierten Benutzers über ein Azure-AI-Modell zusammenfassen.
 
-   ```bash
-     ./start.sh
-   ```
+Implementierte Schutzmaßnahmen:
 
-### 6. Test Everything Works! 🎉
+- Authentifizierung vor Verarbeitung der Anfrage
+- Datenbankabfragen mit Benutzerfilter
+- Begrenzung auf maximal 20 Notizen pro Anfrage
+- Begrenzung der verarbeiteten Textlängen
+- Trennung zwischen Systemanweisungen und Notizinhalten
+- Authentifizierung gegenüber Azure AI über Workload Identity
+- Timeout und kontrollierte Fehlerbehandlung
 
-1. **Visit the API docs**: http://localhost:8000/docs
-1. **Create your first entry** In the Docs UI Use the POST `/entries` endpoint to create a new journal entry.
-1. **View your entries** using the GET `/entries` endpoint to see what you've created!
+Notizinhalte werden als nicht vertrauenswürdige Eingaben behandelt. Die Prompt-Injection-Abwehr ist eine Risikoreduzierung, keine vollständige Sicherheitsgarantie.
 
-**🎯 Congratulations! You have a fully functional learning journal API with complete CRUD operations, validation, and logging!**
+## Monitoring und Betrieb
 
-## ⚙️ API Endpoints
+Für die Überwachung werden Azure Monitor, Container Insights und Log Analytics verwendet.
 
-This learning journal API provides complete CRUD functionality:
+Erfasste Informationen umfassen:
 
-- **POST /entries** - Create a new journal entry with validation
-- **GET /entries** - Retrieve all journal entries with count
-- **GET /entries/{entry_id}** - Retrieve a single journal entry by ID
-- **PATCH /entries/{entry_id}** - Update an existing journal entry
-- **DELETE /entries/{entry_id}** - Delete a specific journal entry
-- **DELETE /entries** - Delete all journal entries
+- Container-Logs
+- Pod- und Containerzustände
+- Container-Neustarts
+- Ressourcenmetriken
 
-All endpoints include proper error handling, data validation using Pydantic models, and structured logging for debugging and monitoring.
+Zusätzlich besitzt die API zwei Healthcheck-Endpunkte:
 
-## ☁️ Azure CLI for Deployment
+| Endpoint | Funktion |
+|---|---|
+| `/health/live` | Prüft die Erreichbarkeit des API-Prozesses |
+| `/health/ready` | Prüft API und PostgreSQL-Verbindung |
 
-The dev container includes the Azure CLI pre-installed, allowing you to deploy your API directly to Azure cloud services. Use the `az` command in your terminal to authenticate with Azure, create resources like App Services and PostgreSQL databases, and deploy your application—all from within your development environment.
+Eine Terraform-Konfiguration für eine Log-Analytics-basierte Alert-Regel ist vorbereitet und validiert, aber noch nicht in Azure bereitgestellt.
 
-## 📊 Data Schema
+## Durchgeführte Tests
 
-Each journal entry follows this structure:
+Im Projekt wurden unter anderem folgende Tests erfolgreich durchgeführt:
 
-| Field       | Type      | Description                                | Validation                   |
-|-------------|-----------|--------------------------------------------|------------------------------|
-| id          | string    | Unique identifier (UUID)                   | Auto-generated               |
-| work        | string    | What did you work on today?                | Required, max 256 characters |
-| struggle    | string    | What's one thing you struggled with today? | Required, max 256 characters |
-| intention   | string    | What will you study/work on tomorrow?      | Required, max 256 characters |
-| created_at  | datetime  | When entry was created                     | Auto-generated UTC           |
-| updated_at  | datetime  | When entry was last updated                | Auto-updated UTC             |
+- HTTPS-Erreichbarkeit des Frontends
+- Microsoft-Entra-Anmeldung
+- Erstellen, Bearbeiten und Löschen von Lernnotizen
+- Zugriff auf geschützte API-Endpunkte ohne gültiges Token wird abgelehnt
+- KI-Zusammenfassung über die produktive Webanwendung
+- Kubernetes-Rollouts und Healthchecks
+- NetworkPolicy-Tests mit erlaubten und blockierten Verbindungen
+- Schreibschutz des Container-Dateisystems
+- Secret-Bereitstellung über Azure Key Vault
+- Azure-AI-Smoke-Test mit Workload Identity
+- Erfassung von Kubernetes-Logs und Metriken in Log Analytics
+- KQL-Simulation verschiedener Monitoring-Zustände
 
-## 🗄️ Explore Your Database (Optional)
+## Bekannte Einschränkungen und offene Prüfungen
 
-Want to see your data directly in the database? You can connect to PostgreSQL using VS Code's PostgreSQL extension:
+- Benutzerisolation wurde im SQL-Code überprüft; ein vollständiger Cross-User-Test mit zwei unterschiedlichen Entra-Konten steht noch aus.
+- Die KI-Funktion verfügt über grundlegende Schutzmaßnahmen gegen Prompt Injection, aber keine absolute Isolation gegenüber manipulierten Eingaben.
+- Die vorbereitete Azure-Monitor-Alarmregel ist noch nicht aktiviert.
+- Eine automatisierte externe HTTPS-Verfügbarkeitsüberwachung ist noch nicht eingerichtet.
+- Die vorhandenen Healthchecks prüfen nicht sämtliche externen Abhängigkeiten, insbesondere nicht Microsoft Entra ID und Azure AI.
+- Vollständige Disaster-Recovery- und Wiederherstellungstests sind nicht nachgewiesen.
 
-### 1. Install PostgreSQL Extension
+## Repository
 
-1. **Install the PostgreSQL extension** in VS Code (search for "PostgreSQL" by Chris Kolkman)
-2. **Restart VS Code** after installation
+**GitHub:** https://github.com/TraceWatcher/learningsteps-devsecops
 
-### 2. Connect to Your Database
+Dieses Repository dokumentiert die technische Umsetzung, Infrastrukturkonfiguration, Sicherheitsmaßnahmen und die Weiterentwicklung der LearningSteps-Anwendung.
 
-1. **Open the PostgreSQL extension** (click the PostgreSQL icon in the sidebar)
-2. **Click "Add Connection"** or the "+" button
-3. **Enter these connection details**:
-   - **Host name**: `postgres`
-   - **User name**: `postgres`
-   - **Password**: `postgres`
-   - **Port**: `5432`
-   - **Conection Type**: `Standard/No SSL`
-   - **Database**: `learning_journal`
-   - **Display name**: `Learning Journal DB` (or any name you prefer)
+## Projektcharakter
 
-### 3. Explore Your Data
+LearningSteps ist eine Lern- und Demonstrationsumgebung für Cloud Security und DevSecOps.
 
-1. **Expand your connection** in the PostgreSQL panel
-2. **Left-click on "Learning Journal DB" to expand**
-3. **Right-click on "learning_journal"**
-4. **Select "New Query"**
-5. **Type this query** to see all your entries:
+Das Projekt verfolgt das Ziel, Sicherheitskonzepte praktisch umzusetzen, ihre Wirksamkeit anhand reproduzierbarer Tests zu überprüfen und verbleibende Risiken nachvollziehbar zu dokumentieren.
 
-   ```sql
-   SELECT * FROM entries;
-   ```
-
-6. **Run the query** to see all your journal data! (Ctrl/Cmd + Enter OR use the PostgreSQL command pallete: Run Query)
-
-You can now explore the database structure, see exactly how your data is stored, and run custom queries to understand PostgreSQL better.
-
-## 🔧 Troubleshooting
-
-**If the API won't start:**
-
-- Make sure the PostgreSQL container is running: `docker ps`
-- Check the container logs: `docker logs your-postgres-container-name`
-- Restart the database: `docker restart your-postgres-container-name`
-
-**If you can't connect to the database:**
-
-- Verify the `.env` file exists and has the correct DATABASE_URL
-- Make sure Docker Desktop is running
-- Try restarting the dev container: `Dev Containers: Rebuild Container`
-
-**If the dev container won't open:**
-
-- Ensure Docker Desktop is running
-- Install the "Dev Containers" extension in VS Code
-- Try: `Dev Containers: Rebuild and Reopen in Container`
+Die erfolgreiche Bereitstellung und die bestandenen automatisierten Tests sind keine Garantie für vollständige Produktionssicherheit.
