@@ -1,5 +1,9 @@
 # Temporary backup storage for the LearningSteps migration.
 
+# Private Endpoint only; public network access is disabled.
+# Trusted Azure Services bypass is intentionally not enabled.
+# Security exception: AVD-AZU-0010 (review if architecture changes).
+#trivy:ignore:AVD-AZU-0010
 resource "azurerm_storage_account" "maintenance_backup" {
   name                     = "stlstepsbackup305c3ba6"
   resource_group_name      = azurerm_resource_group.learningsteps.name
@@ -16,6 +20,11 @@ resource "azurerm_storage_account" "maintenance_backup" {
   shared_access_key_enabled       = false
   default_to_oauth_authentication = true
   local_user_enabled              = false
+
+  network_rules {
+    default_action = "Deny"
+    bypass         = ["None"]
+  }
 
   blob_properties {
     delete_retention_policy {
