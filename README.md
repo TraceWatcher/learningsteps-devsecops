@@ -10,6 +10,21 @@ Der Fokus liegt nicht nur auf der Bereitstellung der Anwendung, sondern insbeson
 
 Das Projekt wurde im Rahmen der Cybersecurity-Weiterbildung entwickelt.
 
+## Technische Dokumentation
+
+Die Implementierung, Sicherheitsmaßnahmen, Tests und Betriebsprozesse sind in separaten Dokumenten beschrieben:
+
+| Dokument | Inhalt |
+|---|---|
+| [Architektur](docs/ARCHITECTURE.md) | Azure-Architektur, Kubernetes, Netzwerkdesign, Identitäten und Datenflüsse |
+| [Sicherheit](docs/SECURITY.md) | Sicherheitskonzept, implementierte Schutzmaßnahmen und verbleibende Risiken |
+| [Tests](docs/TESTING.md) | Funktionstests, Security-Tests, CI/CD-Prüfungen und offene Testfälle |
+| [Betrieb](docs/OPERATIONS.md) | Deployment, Monitoring, Fehlerdiagnose, Wartung und sichere Bereinigung |
+
+Die Dokumentation unterscheidet zwischen implementierten Sicherheitsmaßnahmen, praktisch überprüften Funktionen und noch offenen Prüfungen.
+
+LearningSteps ist als Lern- und Demonstrationsprojekt konzipiert und nicht als vollständig produktionsreife Anwendung freigegeben.
+
 ### Implementierte Funktionen
 
 - Lernnotizen erstellen, anzeigen, bearbeiten und löschen
