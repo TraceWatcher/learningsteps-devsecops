@@ -76,6 +76,12 @@ resource "azurerm_monitor_data_collection_rule" "aks_monitoring" {
     managed_by  = "terraform"
     project     = "LearningSteps"
   }
+
+  lifecycle {
+    ignore_changes = [
+      tags["created-on"]
+    ]
+  }
 }
 
 # DCR Association – AKS mit Datensammlungsregel verbinden
