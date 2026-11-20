@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: learningsteps-web
+  namespace: learningsteps
+  labels:
+    app: learningsteps-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: learningsteps-web
+  template:
+    metadata:
+      labels:
+        app: learningsteps-web
+    spec:
+      containers:
+        - name: web
+          image: acrlearningstepsbff17e9a.azurecr.io/learningsteps-web:v0.6.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: learningsteps-web
+  namespace: learningsteps
+spec:
+  type: ClusterIP
+  selector:
+    app: learningsteps-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP

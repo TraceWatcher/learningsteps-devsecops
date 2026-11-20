@@ -1,0 +1,54 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: learningsteps-gateway
+  namespace: learningsteps
+spec:
+  gatewayClassName: approuting-istio
+  listeners:
+    - name: https
+      hostname: learningsteps.6aff4a07cf83170001eabf87.westeurope.aksapp.io
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: learningsteps-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: learningsteps-route
+  namespace: learningsteps
+spec:
+  parentRefs:
+    - name: learningsteps-gateway
+      sectionName: https
+  hostnames:
+    - learningsteps.6aff4a07cf83170001eabf87.westeurope.aksapp.io
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: learningsteps-api
+          port: 80
+
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: learningsteps-web
+          port: 80

@@ -1,0 +1,8 @@
+apiVersion: approuting.kubernetes.azure.com/v1alpha1
+kind: DefaultDomainCertificate
+metadata:
+  name: learningsteps-tls
+  namespace: learningsteps
+spec:
+  target:
+    secret: learningsteps-tls
