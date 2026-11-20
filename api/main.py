@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -56,6 +57,14 @@ async def health_live():
     """Check whether the API process is responding."""
     return {"status": "alive"}
 
+
+@app.get("/health/version", tags=["Health"])
+async def health_version():
+    """Expose the deployed application version."""
+    return {
+        "application": "LearningSteps",
+        "version": os.getenv("APP_VERSION", "dev"),
+    }
 
 
 @app.get("/health/ready", tags=["Health"])

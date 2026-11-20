@@ -130,6 +130,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           docker build \
+            --build-arg APP_VERSION="$TAG" \
             -t acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:"$TAG" \
             .
 

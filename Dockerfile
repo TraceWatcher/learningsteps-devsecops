@@ -3,6 +3,10 @@ FROM python:3.12-alpine
 
 WORKDIR /app
 
+# Application version supplied during the release build
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 # Apply available Alpine security updates
 RUN apk upgrade --no-cache
 
