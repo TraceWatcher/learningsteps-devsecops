@@ -11,4 +11,4 @@ data:
   DB_PASSWORD_FILE: "/mnt/secrets/postgres-admin-password"
   AZURE_OPENAI_ENDPOINT: "https://oai-learningsteps-305c3ba6.openai.azure.com/"
   AZURE_OPENAI_DEPLOYMENT: "learningsteps-summary"
-  AI_SUMMARY_ENABLED: "false"
+  AI_SUMMARY_ENABLED: "true"
