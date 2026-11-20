@@ -273,10 +273,19 @@ Die Backend-Authentifizierung erfolgt über Microsoft Entra ID.
 
 ### Aktuelle Schutzmaßnahmen
 
-- HTTPS und TLS 1.2
+- HTTPS-Zwang und Mindest-TLS-Version 1.2
+- Microsoft-Entra-basierte Backend-Authentifizierung
+- Shared-Key-Authentifizierung deaktiviert
+- Anonymer öffentlicher Blob-Zugriff deaktiviert
 - Blob Soft Delete mit sieben Tagen Aufbewahrung
-- Blob-Versionierung
-- Separater Storage Account
+- Blob-Versionierung aktiviert
+- Lifecycle-Policy `delete-old-tfstate-versions` aktiv
+- Frühere Versionen des Blobs `tfstate/learningsteps.terraform.tfstate` werden nach mehr als 90 Tagen automatisch gelöscht
+- Die aktuelle Blob-Version ist von der Lifecycle-Löschaktion ausgenommen
+
+Die erfolgreiche Erreichbarkeit des Remote-States wurde nach der Deaktivierung der Shared-Key-Authentifizierung erneut bestätigt.
+
+Die Lifecycle-Policy ist keine unabhängige Datensicherung. Ein praktischer Restore-Test steht weiterhin aus.
 
 ### State-Zugriff prüfen
 
@@ -553,8 +562,8 @@ Sicherheitsrelevante Daten dürfen bei einer Untersuchung nicht unkontrolliert g
 - Ein externer automatisierter HTTPS-Test fehlt.
 - Die Wiederherstellung von PostgreSQL und Terraform-State wurde noch nicht praktisch nachgewiesen.
 - Der Terraform-State-Storage verwendet bisher keine restriktive Netzwerk-Standardregel.
-- Die Shared-Key-Authentifizierung des Terraform-State-Storage ist nicht ausdrücklich deaktiviert.
-- Die Begrenzung alter Blob-Versionen ist noch nicht abschließend konfiguriert.
+- Eine unabhängige Sicherung und ein praktischer Wiederherstellungstest des Terraform-States stehen noch aus.
+- Die Lifecycle-Policy entfernt frühere Terraform-State-Versionen nach mehr als 90 Tagen; langfristige Aufbewahrung ist damit nicht gewährleistet.
 - Ein vollständiger automatisierter Cleanup-Prozess ist nicht dokumentiert.
 
 ## 16. Betriebsstatus

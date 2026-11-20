@@ -219,20 +219,31 @@ Das AzureRM-Backend verwendet Microsoft Entra ID (`use_azuread_auth = true`) und
 - Mindest-TLS-Version 1.2
 - Anonymer öffentlicher Blob-Zugriff deaktiviert
 - Microsoft-Entra-basierte Backend-Authentifizierung
+- Shared-Key-Authentifizierung ausdrücklich deaktiviert
 - Blob Soft Delete mit sieben Tagen Aufbewahrung
 - Blob-Versionierung aktiviert
+- Lifecycle-Policy `delete-old-tfstate-versions` aktiviert
+- Automatische Löschung früherer State-Blob-Versionen nach mehr als 90 Tagen
+- Keine Lifecycle-Löschaktion für die aktuelle Blob-Version konfiguriert
+
+**Durchgeführte Verifikation:**
+
+- Azure-CLI-Zugriff mit `--auth-mode login` erfolgreich
+- Terraform-Remote-State über `terraform state list` erreichbar
+- Terraform-Plan nach Aktivierung von Soft Delete und Versionierung erfolgreich
+- Terraform-Zugriff nach Deaktivierung der Shared-Key-Authentifizierung erneut erfolgreich
+- Lifecycle-Policy über Azure CLI ausgelesen und bestätigt
 
 **Verbleibende Risiken:**
 
-- Netzwerk-Standardregel `Allow`; keine restriktive Storage-Firewall konfiguriert.
-- Shared-Key-Authentifizierung nicht ausdrücklich deaktiviert.
-- Mehrere übergeordnete Azure-RBAC-Rollen mit weitreichenden Verwaltungsrechten.
-- Keine geprüfte Lifecycle-Regel zur Begrenzung alter Blob-Versionen.
-- Wiederherstellung eines früheren Terraform-State-Stands noch nicht praktisch getestet.
+- Netzwerk-Standardregel des Storage Accounts steht weiterhin auf `Allow`.
+- Mehrere übergeordnete Azure-RBAC-Rollen ermöglichen weitreichende Verwaltungszugriffe.
+- Frühere State-Versionen werden nach Ablauf der konfigurierten Aufbewahrungsfrist automatisch gelöscht.
+- Eine unabhängige Sicherung und praktische Wiederherstellung eines früheren Terraform-State-Stands wurden noch nicht nachgewiesen.
 
-Terraform-State-Dateien können vertrauliche Informationen wie Datenbankpasswörter enthalten.
+Terraform-State-Dateien können vertrauliche Informationen wie Datenbankpasswörter und Infrastrukturdetails enthalten.
 
-Als weitere Härtungsmaßnahmen sind die Prüfung der Shared-Key-Nutzung, eine Einschränkung des Netzwerkzugriffs und eine kontrollierte Versionierungs- und Wiederherstellungsstrategie vorgesehen.
+Eine weitere Einschränkung des Netzwerkzugriffs erfordert zunächst einen geeigneten Zugangsweg für die Terraform-Administration. Die Wiederherstellbarkeit des States muss vor dem abschließenden Infrastructure-Recovery-Test gesondert abgesichert werden.
 
 ## 7. Software Supply Chain Security
 
