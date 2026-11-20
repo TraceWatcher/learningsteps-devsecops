@@ -116,6 +116,43 @@ jobs:
           trivyignores: .trivyignore.yaml
           exit-code: "1"
 
+  kubernetes-schema:
+    name: Kubernetes Schema Validation
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Kubeconform
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl -fsSL --retry 3 \
+            https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz \
+            -o /tmp/kubeconform.tar.gz
+
+          sudo tar -xzf /tmp/kubeconform.tar.gz \
+            -C /usr/local/bin kubeconform
+
+          kubeconform -v
+
+      - name: Validate Kubernetes manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubeconform \
+            -strict \
+            -summary \
+            -verbose \
+            -kubernetes-version 1.36.5 \
+            -schema-location default \
+            -schema-location 'schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            k8s-manifests/
+
   container:
     name: Docker Build & Vulnerability Scan
     runs-on: ubuntu-24.04
