@@ -50,7 +50,8 @@ resource "azurerm_kubernetes_cluster" "learningsteps" {
 
   lifecycle {
     ignore_changes = [
-      tags["created-on"]
+      tags["created-on"],
+      web_app_routing
     ]
   }
 
@@ -77,6 +78,11 @@ resource "azurerm_kubernetes_cluster" "learningsteps" {
 
   key_vault_secrets_provider {
     secret_rotation_enabled = true
+  }
+
+  oms_agent {
+    log_analytics_workspace_id      = azurerm_log_analytics_workspace.learningsteps.id
+    msi_auth_for_monitoring_enabled = true
   }
 
   tags = {
