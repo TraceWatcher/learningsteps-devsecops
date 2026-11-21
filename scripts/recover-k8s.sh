@@ -79,9 +79,24 @@ API_CLIENT_ID="$(terraform -chdir="$TF_DIR" \
 
 echo "[4/6] Reading ACR and AKS default domain"
 
-ACR_LOGIN_SERVER="$(az acr show \
-  --name acrlearningstepsbff17e9a \
-  --query loginServer -o tsv)"
+mapfile -t ACR_SERVERS < <(
+  az acr list \
+    --resource-group "$RESOURCE_GROUP" \
+    --query '[].loginServer' \
+    -o tsv
+)
+
+if [[ "${#ACR_SERVERS[@]}" -ne 1 ]]; then
+  echo "ERROR: Expected exactly one ACR in resource group"
+  exit 1
+fi
+
+ACR_LOGIN_SERVER="${ACR_SERVERS[0]}"
+
+[[ "$ACR_LOGIN_SERVER" == *.azurecr.io ]] || {
+  echo "ERROR: Invalid ACR login server"
+  exit 1
+}
 
 DOMAIN="$(az aks approuting defaultdomain show \
   --resource-group "$RESOURCE_GROUP" \
@@ -133,41 +148,73 @@ files = [
 for name in files:
     shutil.copyfile(root / name, out / name)
 
-def replace_checked(filename, old, new, count):
+import re
+
+def replace_pattern(filename, pattern, replacement, expected=1):
     path = out / filename
     contents = path.read_text()
-    actual = contents.count(old)
-    if actual != count:
+
+    updated, count = re.subn(
+        pattern,
+        replacement,
+        contents,
+        flags=re.MULTILINE
+    )
+
+    if count != expected:
         raise RuntimeError(
-            f"{filename}: expected {count} occurrences, found {actual}"
+            f"{filename}: expected {expected} replacements, got {count}"
         )
-    path.write_text(contents.replace(old, new))
 
-old_client_id = "d55e78fb-b729-404b-9bb0-a9f10e52e796"
-old_registry = "acrlearningstepsbff17e9a.azurecr.io"
-old_hostname = (
-    "learningsteps."
-    "6aff4a07cf83170001eabf87.westeurope.aksapp.io"
+    path.write_text(updated)
+
+
+# Workload Identity
+replace_pattern(
+    "serviceaccount.yaml",
+    r'^([ \t]*azure\.workload\.identity/client-id:[ \t]*)["\']?[\w-]+["\']?[ \t]*$',
+    lambda m: f'{m.group(1)}"{client_id}"'
 )
 
-replace_checked("serviceaccount.yaml", old_client_id, client_id, 1)
-replace_checked("secretproviderclass.yaml", old_client_id, client_id, 1)
+replace_pattern(
+    "secretproviderclass.yaml",
+    r'^([ \t]*clientID:[ \t]*)["\']?[\w-]+["\']?[ \t]*$',
+    lambda m: f'{m.group(1)}"{client_id}"'
+)
 
-replace_checked(
+
+# Container images
+replace_pattern(
     "deployment.yaml",
-    old_registry + "/learningsteps-api:v0.6.0",
-    registry + "/learningsteps-api:v0.7.0",
-    1
+    r'^([ \t]*image:[ \t]*)\S+/learningsteps-api:\S+',
+    lambda m: (
+        f"{m.group(1)}"
+        f"{registry}/learningsteps-api:v0.7.0"
+    )
 )
 
-replace_checked(
+replace_pattern(
     "web-deployment.yaml",
-    old_registry + "/learningsteps-web:v0.6.0",
-    registry + "/learningsteps-web:v0.6.0",
-    1
+    r'^([ \t]*image:[ \t]*)\S+/learningsteps-web:\S+',
+    lambda m: (
+        f"{m.group(1)}"
+        f"{registry}/learningsteps-web:v0.6.0"
+    )
 )
 
-replace_checked("https-gateway.yaml", old_hostname, hostname, 2)
+
+# Gateway and HTTPRoute hostname
+replace_pattern(
+    "https-gateway.yaml",
+    r'^([ \t]*hostname:[ \t]*)learningsteps\.[^\s]+',
+    lambda m: f"{m.group(1)}{hostname}"
+)
+
+replace_pattern(
+    "https-gateway.yaml",
+    r'^([ \t]*-[ \t]*)learningsteps\.[^\s]+',
+    lambda m: f"{m.group(1)}{hostname}"
+)
 
 print(f"Prepared {len(files)} manifests")
 print(f"Gateway hostname: {hostname}")
