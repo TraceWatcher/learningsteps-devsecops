@@ -15,6 +15,7 @@ POSTGRES_NAME="psql-learningsteps-305c3ba6"
 BACKUP_FILE="$RECOVERY_DIR/learningsteps-20261121-180103.dump.age"
 KEY_FILE="$RECOVERY_DIR/backup-key.txt"
 UID_FILE="$RECOVERY_DIR/original-cluster-uid.txt"
+PG_IDENTITY_FILE="$RECOVERY_DIR/original-postgres.json"
 
 MODE="${1:---dry-run}"
 
@@ -33,7 +34,12 @@ done
 
 echo "[1/6] Checking recovery files"
 
-for file in "$BACKUP_FILE" "$KEY_FILE" "$UID_FILE"; do
+for file in \
+  "$BACKUP_FILE" \
+  "$KEY_FILE" \
+  "$UID_FILE" \
+  "$PG_IDENTITY_FILE"; do
+
   [[ -s "$file" ]] || {
     echo "ERROR: Missing or empty recovery file: $file"
     exit 1
@@ -136,6 +142,44 @@ assert db["state"] == "Ready", "PostgreSQL is not ready"
 
 print("PASS: Azure PostgreSQL 16 is ready")
 PY
+
+echo "[SECURITY] Checking PostgreSQL generation"
+
+CURRENT_PG_CREATED_AT="$(az postgres flexible-server show \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$POSTGRES_NAME" \
+  --query systemData.createdAt \
+  -o tsv)"
+
+ORIGINAL_PG_CREATED_AT="$(python3 - "$PG_IDENTITY_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+
+print(data["createdAt"])
+PY
+)"
+
+if [[ -z "$CURRENT_PG_CREATED_AT" ||
+      "$CURRENT_PG_CREATED_AT" == "None" ||
+      -z "$ORIGINAL_PG_CREATED_AT" ]]; then
+  echo "ERROR: PostgreSQL creation timestamp unavailable"
+  exit 1
+fi
+
+if [[ "$CURRENT_PG_CREATED_AT" == "$ORIGINAL_PG_CREATED_AT" ]]; then
+  if [[ "$MODE" == "--restore" ]]; then
+    echo "ERROR: Original PostgreSQL instance detected."
+    echo "Restore is prohibited on the original database server."
+    exit 1
+  fi
+
+  echo "INFO: Original PostgreSQL instance detected"
+else
+  echo "PASS: PostgreSQL creation timestamp differs from original"
+fi
 
 echo "[6/6] Checking encrypted backup"
 
