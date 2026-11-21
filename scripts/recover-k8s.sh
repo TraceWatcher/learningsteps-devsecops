@@ -13,8 +13,11 @@ RESOURCE_GROUP="rg-learningsteps-devsecops"
 AKS_NAME="aks-learningsteps"
 NAMESPACE="learningsteps"
 
-if [[ "${1:---dry-run}" != "--dry-run" || $# -gt 1 ]]; then
-  echo "ERROR: Only --dry-run is supported."
+MODE="${1:---dry-run}"
+
+if [[ $# -gt 1 ]] ||
+   [[ "$MODE" != "--dry-run" && "$MODE" != "--bootstrap" ]]; then
+  echo "Usage: $0 [--dry-run|--bootstrap]"
   exit 2
 fi
 
@@ -231,4 +234,90 @@ kubectl create \
 echo
 echo "PASS: Recovery manifests prepared and client-side validated"
 echo "Directory: $OUT_DIR"
-echo "No Azure or Kubernetes resources were modified."
+
+if [[ "$MODE" == "--dry-run" ]]; then
+  echo "DRY RUN: No Azure or Kubernetes resources were modified."
+  exit 0
+fi
+
+# ----------------------------------------------------
+# Bootstrap safety checks
+# ----------------------------------------------------
+
+echo "[BOOTSTRAP] Verifying cluster identity"
+
+UID_FILE="$HOME/learningsteps-recovery/original-cluster-uid.txt"
+
+if [[ ! -f "$UID_FILE" ]]; then
+  echo "ERROR: Original cluster UID reference missing"
+  exit 1
+fi
+
+ORIGINAL_UID="$(cat "$UID_FILE")"
+
+CURRENT_UID="$(kubectl get namespace kube-system \
+  -o jsonpath='{.metadata.uid}')"
+
+if [[ -z "$ORIGINAL_UID" || -z "$CURRENT_UID" ]]; then
+  echo "ERROR: Cluster UID is missing"
+  exit 1
+fi
+
+if [[ "$ORIGINAL_UID" == "$CURRENT_UID" ]]; then
+  echo "ERROR: Original AKS cluster detected."
+  echo "Bootstrap is not permitted on the original cluster."
+  exit 1
+fi
+
+echo "PASS: Cluster UID differs from original cluster"
+
+# Recheck target immediately before modifying resources
+CURRENT_CONTEXT="$(kubectl config current-context)"
+
+if [[ "$CURRENT_CONTEXT" != "$AKS_NAME" ]]; then
+  echo "ERROR: Unexpected kubectl context: $CURRENT_CONTEXT"
+  exit 1
+fi
+
+echo
+echo "TARGET: $RESOURCE_GROUP / $AKS_NAME"
+echo "NAMESPACE: $NAMESPACE"
+echo "ACTION: Create Kubernetes recovery base resources"
+echo
+echo "No API Deployment, Web Deployment or database restore"
+echo "will be performed."
+echo
+
+if [[ ! -t 0 ]]; then
+  echo "ERROR: Interactive confirmation required"
+  exit 1
+fi
+
+read -r -p \
+  "Type 'BOOTSTRAP aks-learningsteps' to continue: " \
+  CONFIRMATION
+
+if [[ "$CONFIRMATION" != "BOOTSTRAP aks-learningsteps" ]]; then
+  echo "Bootstrap cancelled"
+  exit 1
+fi
+
+echo "[BOOTSTRAP] Creating namespace"
+
+kubectl apply -f "$OUT_DIR/namespace.yaml"
+
+echo "[BOOTSTRAP] Creating identity and configuration"
+
+kubectl apply \
+  -f "$OUT_DIR/serviceaccount.yaml" \
+  -f "$OUT_DIR/secretproviderclass.yaml" \
+  -f "$OUT_DIR/configmap.yaml" \
+  -f "$OUT_DIR/db-schema-configmap.yaml"
+
+echo "[BOOTSTRAP] Creating API service"
+
+kubectl apply -f "$OUT_DIR/service.yaml"
+
+echo
+echo "PASS: Kubernetes base resources applied"
+echo "STOP: PostgreSQL recovery must be completed next"
