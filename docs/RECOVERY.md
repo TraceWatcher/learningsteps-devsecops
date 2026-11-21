@@ -1,8 +1,8 @@
 # LearningSteps – Infrastructure Recovery Runbook
 
-**Projekt:** LearningSteps DevSecOps on Azure  
-**Stand:** 21.11.2026  
-**Status:** Prepared – Full infrastructure recovery not yet executed  
+**Projekt:** LearningSteps DevSecOps on Azure
+**Stand:** 21.11.2026
+**Status:** Prepared – Full infrastructure recovery not yet executed
 **Ziel:** Vollständige Wiederherstellung der LearningSteps-Infrastruktur und Anwendung nach einem kontrollierten Terraform-Destroy.
 
 ## 1. Recovery-Ziel und Umfang
