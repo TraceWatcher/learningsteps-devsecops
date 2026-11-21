@@ -203,7 +203,7 @@ else
   echo "Preflight completed. Database has not been modified."
 fi
 
-if [[ "$MODE" == "--check-target" ]]; then
+if [[ "$MODE" == "--check-target" || "$MODE" == "--restore" ]]; then
   echo
   echo "[TARGET CHECK] Preparing PostgreSQL client"
 
@@ -285,12 +285,215 @@ POD_CREATED=true
       "$CLIENT_POD" \
       -- sh -s
 
-  echo "PASS: Database target contains no conflicting schema objects"
+echo "PASS: Database target contains no conflicting schema objects"
 
+if [[ "$MODE" == "--check-target" ]]; then
   exit 0
 fi
 
-if [[ "$MODE" == "--restore" ]]; then
-  echo "ERROR: Restore implementation is not enabled yet."
+# ----------------------------------------------------
+# Restore safety checks
+# ----------------------------------------------------
+
+echo "[RESTORE] Checking for competing Kubernetes workloads"
+
+export CLIENT_POD
+
+kubectl get deployments,jobs,cronjobs,pods \
+  -n learningsteps \
+  -o json |
+python3 -c '
+import json
+import sys
+
+objects = json.load(sys.stdin)["items"]
+blocking = []
+
+for obj in objects:
+    kind = obj["kind"]
+    name = obj["metadata"]["name"]
+
+    # API deployments must not be running during recovery.
+    if kind == "Deployment" and name == "learningsteps-api":
+        replicas = obj.get("spec", {}).get("replicas", 1)
+        if replicas > 0:
+            blocking.append(f"{kind}/{name}: replicas={replicas}")
+
+    # Reject active application API pods, including terminating ones.
+    if kind == "Pod" and obj.get("metadata", {}).get(
+        "labels", {}
+    ).get("app") == "learningsteps-api":
+        phase = obj.get("status", {}).get("phase")
+        if phase not in ("Succeeded", "Failed"):
+            blocking.append(f"{kind}/{name}: {phase}")
+
+    # A running database initialization job must block restore.
+    if kind == "Job" and name.startswith("learningsteps-db-init"):
+        status = obj.get("status", {})
+        if (
+            status.get("active", 0) > 0
+            or status.get("succeeded", 0) == 0
+            and status.get("failed", 0) == 0
+        ):
+            blocking.append(f"{kind}/{name}: incomplete")
+
+    # Prevent future scheduled database initialization.
+    if kind == "CronJob" and name.startswith("learningsteps-db-init"):
+        if not obj.get("spec", {}).get("suspend", False):
+            blocking.append(f"{kind}/{name}: not suspended")
+
+if blocking:
+    print("ERROR: Potential database writers detected:")
+    for item in blocking:
+        print(" -", item)
+    sys.exit(1)
+
+print("PASS: No known competing application writers detected")
+'
+
+echo "[RESTORE] Checking active PostgreSQL connections"
+
+kubectl exec \
+  -n learningsteps \
+  "$CLIENT_POD" \
+  -- sh -ec '
+    export PGPASSWORD="$(cat /mnt/secrets/postgres-admin-password)"
+    export PGOPTIONS="-c default_transaction_read_only=on"
+
+    ACTIVE=$(psql -X -A -t -v ON_ERROR_STOP=1 \
+      -c "
+        SELECT COUNT(*)
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND backend_type = '\''client backend'\'';
+      ")
+
+    if [ "$ACTIVE" != "0" ]; then
+      echo "ERROR: Other PostgreSQL connections detected: $ACTIVE"
+      exit 1
+    fi
+
+    echo "PASS: No competing PostgreSQL connections detected"
+  '
+
+echo
+echo "DATABASE RESTORE REQUEST"
+echo "Resource Group: $RESOURCE_GROUP"
+echo "PostgreSQL:     $POSTGRES_NAME"
+echo "Database:       learning_journal"
+echo "Backup:         $(basename "$BACKUP_FILE")"
+echo
+echo "This will restore the database schema and data."
+echo
+
+if [[ ! -t 0 ]]; then
+  echo "ERROR: Interactive confirmation required"
   exit 1
+fi
+
+read -r -p \
+  "Type 'RESTORE learning_journal' to continue: " \
+  CONFIRMATION
+
+if [[ "$CONFIRMATION" != "RESTORE learning_journal" ]]; then
+  echo "Restore cancelled"
+  exit 1
+fi
+
+echo "[RESTORE] Rechecking database emptiness"
+
+{
+  printf '%s\n' \
+    'set -eu' \
+    'export PGPASSWORD="$(cat /mnt/secrets/postgres-admin-password)"' \
+    'export PGOPTIONS="-c default_transaction_read_only=on"' \
+    'psql -X -v ON_ERROR_STOP=1 <<'\''SQL'\'''
+
+  cat "$ROOT/scripts/sql/check-empty-database.sql"
+
+  printf '%s\n' 'SQL'
+} | kubectl exec -i \
+    -n learningsteps \
+    "$CLIENT_POD" \
+    -- sh -s
+
+echo "[RESTORE] Restoring encrypted PostgreSQL backup"
+
+age -d \
+  -i "$KEY_FILE" \
+  "$BACKUP_FILE" |
+kubectl exec -i \
+  -n learningsteps \
+  "$CLIENT_POD" \
+  -- sh -ec '
+    export PGPASSWORD="$(cat /mnt/secrets/postgres-admin-password)"
+
+    pg_restore \
+      --host="$PGHOST" \
+      --port="$PGPORT" \
+      --username="$PGUSER" \
+      --dbname="$PGDATABASE" \
+      --no-owner \
+      --no-acl \
+      --single-transaction \
+      --exit-on-error \
+      --verbose
+  '
+
+echo "[RESTORE] Verifying restored data"
+
+kubectl exec \
+  -n learningsteps \
+  "$CLIENT_POD" \
+  -- sh -ec '
+    export PGPASSWORD="$(cat /mnt/secrets/postgres-admin-password)"
+
+    psql -X -v ON_ERROR_STOP=1 <<'\''SQL'\''
+DO $$
+DECLARE
+    entry_count integer;
+    constraint_count integer;
+    index_count integer;
+BEGIN
+    SELECT COUNT(*) INTO entry_count
+    FROM public.entries;
+
+    SELECT COUNT(*) INTO constraint_count
+    FROM pg_constraint
+    WHERE conrelid = '\''public.entries'\''::regclass
+      AND conname IN (
+        '\''entries_owner_required'\'',
+        '\''entries_pkey'\''
+      );
+
+    SELECT COUNT(*) INTO index_count
+    FROM pg_indexes
+    WHERE schemaname = '\''public'\''
+      AND tablename = '\''entries'\''
+      AND indexname IN (
+        '\''idx_entries_created_at'\'',
+        '\''idx_entries_data_gin'\'',
+        '\''idx_entries_owner_created'\''
+      );
+
+    IF entry_count <> 4
+       OR constraint_count <> 2
+       OR index_count <> 3 THEN
+        RAISE EXCEPTION
+          '\''Restore verification failed: entries=%, constraints=%, indexes=%'\'',
+          entry_count, constraint_count, index_count;
+    END IF;
+
+    RAISE NOTICE
+      '\''PASS: entries=%, constraints=%, indexes=%'\'',
+      entry_count, constraint_count, index_count;
+END
+$$;
+SQL
+  '
+
+echo
+echo "PASS: PostgreSQL restore and basic integrity checks completed"
+exit 0
 fi
