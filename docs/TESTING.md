@@ -460,6 +460,131 @@ Ein erfolgreicher Scan beweist nicht die Abwesenheit sämtlicher Schwachstellen.
 
 Die Ergebnisse gelten jeweils für die geprüften Commits und ersetzen keine Laufzeit-Sicherheitsüberprüfung.
 
+### CI-05 – Automatisiertes Azure-Deployment
+
+**Ziel:** Nachweis, dass eine Codeänderung über die GitHub-Actions-Release-Pipeline automatisch bis zur öffentlich erreichbaren AKS-Anwendung bereitgestellt wird.
+
+**Ausgangszustand:**
+
+- API-Image `v0.6.0` auf AKS
+- Automatisches AKS-Deployment über die GitHub-Environment-Variable `ENABLE_AKS_AUTO_DEPLOY=true` aktiviert
+- Release-Workflow wird durch Git-Tags mit dem Präfix `v` ausgelöst
+
+**Vorgehen:**
+
+1. Öffentlichen API-Endpunkt `/health/version` implementieren.
+2. Versionsnummer über das Docker-Build-Argument `APP_VERSION` übergeben.
+3. Änderungen als Commit `85f3275` auf `main` pushen.
+4. Erfolgreichen CI-Lauf kontrollieren.
+5. Release-Tag `v0.7.0` erstellen und pushen.
+6. Automatische GitHub-Actions-Release-Pipeline überwachen.
+7. Laufendes API-Image auf AKS prüfen.
+8. Neue Versionsinformation über die öffentliche HTTPS-Adresse abrufen.
+9. API-Readiness erneut prüfen.
+
+**Erwartetes Ergebnis:**
+
+Die Pipeline führt alle Qualitäts- und Sicherheitsprüfungen erfolgreich aus, veröffentlicht das Container-Image in ACR und aktualisiert selbstständig das API-Deployment auf AKS.
+
+Anschließend ist die neue Versionsinformation über HTTPS erreichbar.
+
+**Beobachtetes Ergebnis:**
+
+- CI-Lauf `44816269990`: erfolgreich, alle vier Jobs bestanden
+- Release-Lauf `44816714185`: erfolgreich
+- Release-Dauer: 2 Minuten 35 Sekunden
+- Schritt `Deploy to AKS`: erfolgreich ausgeführt
+- Bereitgestelltes Container-Image: `acrlearningstepsbff17e9a.azurecr.io/learningsteps-api:v0.7.0`
+- Öffentlicher Versionsendpunkt: erfolgreich erreichbar
+- API-Readiness nach dem Deployment: HTTP 200
+
+Die öffentliche API lieferte:
+
+```json
+{
+  "application": "LearningSteps",
+  "version": "v0.7.0"
+}
+```
+
+**GitHub-Actions-Nachweis:**
+
+https://github.com/TraceWatcher/learningsteps-devsecops/actions/runs/44816714185
+
+**Status:** PASS
+
+**Einschränkung:** Der Release-Workflow wird durch einen Git-Tag-Push ausgelöst. Es wurde kein automatisches Deployment bei jedem gewöhnlichen Push auf `main` nachgewiesen. Der Nachweis bezieht sich auf einen vollständig automatisierten, tagbasierten Release.
+
+### CI-06 – Security Enforcement durch negativen Terraform-Test
+
+**Ziel:** Nachweis, dass die CI-Pipeline eine absichtlich unsichere Terraform-Konfiguration erkennt und den Security-Job fehlschlagen lässt.
+
+**Testumgebung:**
+
+- Separater Git-Branch `test/security-gate-terraform`
+- Pull Request #1 nach `main`
+- Terraform-Testdatei `infra-terraform/security-gate-test.tf`
+- Trivy v0.76.1 lokal
+- Trivy v0.72.0 in GitHub Actions
+
+**Vorgehen:**
+
+1. Separaten Testbranch erstellen.
+2. Eine Terraform Network Security Group mit einer absichtlich unsicheren Ingress-Regel definieren.
+3. Eingehendes SSH auf TCP-Port 22 aus beliebigen Quellnetzen (`source_address_prefix = "*"`) zulassen.
+4. Lokalen Trivy-Konfigurationsscan mit `HIGH,CRITICAL` und `--exit-code 1` durchführen.
+5. Test mit der in CI verwendeten Trivy-Version v0.72.0 wiederholen.
+6. Unsichere Testdatei ausschließlich auf den Testbranch pushen.
+7. Pull Request gegen `main` erstellen und GitHub-Actions-CI auslösen.
+8. Fehlerursache anhand der GitHub-Actions-Logs überprüfen.
+9. Pull Request ohne Merge schließen und beide Testbranches entfernen.
+
+**Erwartetes Ergebnis:**
+
+Trivy erkennt die unsichere Terraform-Regel als HIGH oder CRITICAL und beendet den Security-Scan mit Exit-Code 1.
+
+Die CI-Pipeline wird als fehlgeschlagen markiert.
+
+**Beobachtetes Ergebnis:**
+
+Beide lokalen Trivy-Versionen erkannten die folgenden Schwachstellen:
+
+| Regel | Schweregrad | Beschreibung |
+|---|---|---|
+| `AZU-0047` | CRITICAL | Uneingeschränkter eingehender Netzwerkzugriff |
+| `AZU-0050` | CRITICAL | SSH-Port 22 aus dem Internet erreichbar |
+
+Beide lokalen Scans endeten mit Exit-Code 1.
+
+**GitHub-Actions-Ergebnis:**
+
+| Job | Ergebnis |
+|---|---|
+| Kubernetes Schema Validation | PASS |
+| Python Quality & Tests | PASS |
+| Docker Build & Vulnerability Scan | PASS |
+| Secret & IaC Security | FAIL – erwartetes Testergebnis |
+
+Der Schritt `Terraform security scanning` wurde mit Exit-Code 1 beendet.
+
+Die GitHub-Actions-Logs bestätigen ausdrücklich beide CRITICAL-Befunde in `security-gate-test.tf`, Zeile 18.
+
+**GitHub-Actions-Nachweis:**
+
+https://github.com/TraceWatcher/learningsteps-devsecops/actions/runs/44916955842
+
+**Bereinigung:**
+
+- Pull Request #1 ohne Merge geschlossen
+- Lokaler Testbranch gelöscht
+- Remote-Testbranch gelöscht
+- Die unsichere Terraform-Konfiguration wurde nicht nach `main` übernommen
+- Kein Terraform Apply und keine Azure-Bereitstellung dieser Testressource durchgeführt
+
+**Status:** PASS
+
+**Einschränkung:** Der Test weist die Blockierung durch die CI-Pipeline nach. Ein gesonderter negativer Release-Test mit einem absichtlich fehlschlagenden AKS-Deployment wurde nicht durchgeführt. Die Release-Pipeline enthält jedoch ebenfalls blockierende Security-Scans vor dem Image-Push und AKS-Deployment.
+
 ## 10. Monitoring-Tests
 
 ### MT-01 – Datenerfassung in Log Analytics
@@ -606,6 +731,19 @@ Auch die Monitoring-Datenerfassung und der Zugriff auf den gehärteten Terraform
 
 **Nicht nachgewiesen** sind bislang eine vollständige Cross-User-Isolation, umfassende adversariale Tests, zuverlässige automatische Alarmierung und vollständige Wiederherstellungsprozesse.
 
-LearningSteps erfüllt damit die dokumentierten Lern- und Demonstrationsziele in wesentlichen Bereichen. Eine vollständige Produktionsfreigabe lässt sich aus den bisherigen Tests nicht ableiten.
+### Nachweis der Projekt-Erfolgskriterien
+
+| Erfolgskriterium | Bewertung | Nachweis |
+|---|---|---|
+| Continuous Deployment | PASS – tagbasierter Release | Automatischer AKS-Release `v0.7.0`, GitHub Actions #44816714185 |
+| Security Enforcement | PASS – Terraform-CI-Gate | Zwei CRITICAL-Befunde blockierten CI, GitHub Actions #44916955842 |
+| Infrastructure Recovery | OPEN | Kontrollierter Terraform-Destroy-/Apply-Test noch nicht durchgeführt |
+| Grafana Dashboard | OPTIONAL / NOT IMPLEMENTED | Azure Monitor und Log Analytics stattdessen verwendet |
+
+Die beiden ersten Erfolgskriterien wurden durch tatsächliche GitHub-Actions-Ausführungen nachgewiesen.
+
+Der Infrastruktur-Wiederherstellungstest wird ausdrücklich erst nach Abschluss aller anderen Projektnachweise durchgeführt.
+
+Das optionale Grafana-Dashboard wurde nicht umgesetzt. Die Erfassung realer Kubernetes-Telemetriedaten über Azure Monitor und Log Analytics wurde unabhängig davon bestätigt.
 
 Die Testdokumentation wird bei weiteren Änderungen und durchgeführten Prüfungen fortgeschrieben.
