@@ -18,8 +18,9 @@ UID_FILE="$RECOVERY_DIR/original-cluster-uid.txt"
 
 MODE="${1:---dry-run}"
 
-if [[ $# -gt 1 || "$MODE" != "--dry-run" ]]; then
-  echo "Usage: $0 [--dry-run]"
+if [[ $# -gt 1 ]] ||
+   [[ "$MODE" != "--dry-run" && "$MODE" != "--restore" ]]; then
+  echo "Usage: $0 [--dry-run|--restore]"
   exit 2
 fi
 
@@ -102,8 +103,14 @@ CURRENT_UID="$(kubectl get namespace kube-system \
 }
 
 if [[ "$CURRENT_UID" == "$ORIGINAL_UID" ]]; then
+  if [[ "$MODE" == "--restore" ]]; then
+    echo "ERROR: Original AKS cluster detected."
+    echo "Database restore is prohibited on the original cluster."
+    exit 1
+  fi
+
   echo "INFO: Original AKS cluster detected"
-  echo "INFO: Restore must remain blocked on this cluster"
+  echo "INFO: Restore remains blocked"
 else
   echo "INFO: Cluster UID differs from original"
 fi
@@ -143,3 +150,8 @@ echo
 echo "PASS: PostgreSQL recovery preflight completed"
 echo "MODE: DRY RUN"
 echo "No Azure, Kubernetes or PostgreSQL resources were modified."
+
+if [[ "$MODE" == "--restore" ]]; then
+  echo "ERROR: Restore implementation is not enabled yet."
+  exit 1
+fi
