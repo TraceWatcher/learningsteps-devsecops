@@ -20,8 +20,10 @@ PG_IDENTITY_FILE="$RECOVERY_DIR/original-postgres.json"
 MODE="${1:---dry-run}"
 
 if [[ $# -gt 1 ]] ||
-   [[ "$MODE" != "--dry-run" && "$MODE" != "--restore" ]]; then
-  echo "Usage: $0 [--dry-run|--restore]"
+   [[ "$MODE" != "--dry-run" &&
+      "$MODE" != "--restore" &&
+      "$MODE" != "--check-target" ]]; then
+  echo "Usage: $0 [--dry-run|--check-target|--restore]"
   exit 2
 fi
 
@@ -192,8 +194,101 @@ echo "PASS: Encrypted PostgreSQL archive is readable"
 
 echo
 echo "PASS: PostgreSQL recovery preflight completed"
-echo "MODE: DRY RUN"
-echo "No Azure, Kubernetes or PostgreSQL resources were modified."
+
+if [[ "$MODE" == "--dry-run" ]]; then
+  echo "MODE: DRY RUN"
+  echo "No Azure, Kubernetes or PostgreSQL resources were modified."
+else
+  echo "MODE: $MODE"
+  echo "Preflight completed. Database has not been modified."
+fi
+
+if [[ "$MODE" == "--check-target" ]]; then
+  echo
+  echo "[TARGET CHECK] Preparing PostgreSQL client"
+
+TEMP_DIR="$(mktemp -d)"
+CLIENT_POD="learningsteps-db-recovery-$(date +%s)-$$"
+POD_CREATED=false
+
+cleanup() {
+  local status=$?
+  trap - EXIT
+
+  if [[ "$POD_CREATED" == true ]]; then
+    kubectl delete pod "$CLIENT_POD" \
+      -n learningsteps \
+      --ignore-not-found \
+      --wait=true || echo "WARNING: Manual pod cleanup required: $CLIENT_POD"
+  fi
+
+  rm -rf -- "$TEMP_DIR"
+  exit "$status"
+}
+
+trap cleanup EXIT
+
+"$ROOT/scripts/prepare-db-recovery-client.sh" \
+  "$TEMP_DIR/db-recovery-client.yaml"
+
+# Assign a unique pod name without changing the source manifest.
+export CLIENT_POD
+export MANIFEST="$TEMP_DIR/db-recovery-client.yaml"
+
+python3 - <<'PY'
+import os
+import re
+from pathlib import Path
+
+path = Path(os.environ["MANIFEST"])
+content = path.read_text()
+
+updated, count = re.subn(
+    r'^  name: learningsteps-db-recovery-client$',
+    f'  name: {os.environ["CLIENT_POD"]}',
+    content,
+    flags=re.MULTILINE,
+)
+
+if count != 1:
+    raise SystemExit("ERROR: Expected exactly one pod name")
+
+path.write_text(updated)
+PY
+
+echo "[TARGET CHECK] Starting PostgreSQL client"
+
+# create refuses to take over an existing resource.
+kubectl create -f "$MANIFEST"
+POD_CREATED=true
+
+  kubectl wait \
+    -n learningsteps \
+    --for=condition=Ready \
+    "pod/$CLIENT_POD" \
+    --timeout=120s
+
+  echo "[TARGET CHECK] Checking database schema"
+
+  {
+    printf '%s\n' \
+      'set -eu' \
+      'export PGPASSWORD="$(cat /mnt/secrets/postgres-admin-password)"' \
+      'export PGOPTIONS="-c default_transaction_read_only=on"' \
+      'psql -X -v ON_ERROR_STOP=1 <<'\''SQL'\'''
+
+    cat "$ROOT/scripts/sql/check-empty-database.sql"
+
+    printf '%s\n' 'SQL'
+  } | kubectl exec -i \
+      -n learningsteps \
+      "$CLIENT_POD" \
+      -- sh -s
+
+  echo "PASS: Database target contains no conflicting schema objects"
+
+  exit 0
+fi
 
 if [[ "$MODE" == "--restore" ]]; then
   echo "ERROR: Restore implementation is not enabled yet."
