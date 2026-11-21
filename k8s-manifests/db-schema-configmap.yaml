@@ -1,5 +1,32 @@
 apiVersion: v1
 data:
+  001_add_entry_owner.sql: |
+    -- LearningSteps: Multi-user database migration
+    -- Adds Entra ID ownership to journal entries.
+    -- Existing entries remain unassigned.
+
+    BEGIN;
+
+    ALTER TABLE public.entries
+        ADD COLUMN IF NOT EXISTS owner_id UUID;
+
+    CREATE INDEX IF NOT EXISTS idx_entries_owner_created
+        ON public.entries (owner_id, created_at DESC);
+
+    COMMIT;
+  002_require_owner_for_new_entries.sql: |
+    -- LearningSteps multi-user migration, phase 2
+    -- Existing ownerless records remain intact.
+    -- New records must have an owner_id.
+
+    BEGIN;
+
+    ALTER TABLE public.entries
+    ADD CONSTRAINT entries_owner_required
+    CHECK (owner_id IS NOT NULL)
+    NOT VALID;
+
+    COMMIT;
   database_setup.sql: "-- LearningSteps API Database Setup\n-- This file is automatically
     ran upon the creation of the PostgresSQL container.\n-- You will notice the following
     volume mount in the docker-compose.yml file:\n--      \n--      volumes:\n--        -

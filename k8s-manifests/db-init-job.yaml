@@ -38,13 +38,39 @@ spec:
               export PGPASSWORD="$(cat /mnt/secrets/postgres-admin-password)"
               export PGSSLMODE=require
 
-              psql \
+              echo "Initializing base database schema"
+
+              psql -X -v ON_ERROR_STOP=1 \
                 --host="$PGHOST" \
                 --port=5432 \
                 --username="$PGUSER" \
                 --dbname="$PGDATABASE" \
-                --set=ON_ERROR_STOP=1 \
                 --file=/sql/database_setup.sql
+
+              echo "Applying owner migration 001"
+
+              psql -X -v ON_ERROR_STOP=1 \
+                --file=/sql/001_add_entry_owner.sql
+
+              echo "Checking owner constraint"
+
+              CONSTRAINT_EXISTS=$(psql -X -A -t \
+                -v ON_ERROR_STOP=1 \
+                -c "SELECT EXISTS (
+                  SELECT 1
+                  FROM pg_constraint
+                  WHERE conrelid = 'public.entries'::regclass
+                    AND conname = 'entries_owner_required'
+                );")
+
+              if [ "$CONSTRAINT_EXISTS" = "f" ]; then
+                echo "Applying owner migration 002"
+
+                psql -X -v ON_ERROR_STOP=1 \
+                  --file=/sql/002_require_owner_for_new_entries.sql
+              else
+                echo "Owner constraint already exists"
+              fi
 
               echo "Database schema initialized successfully"
 
