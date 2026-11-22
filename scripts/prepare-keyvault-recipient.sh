@@ -211,5 +211,9 @@ fi
 
 echo
 echo "PASS: Recipient preparation prerequisites verified"
-echo "INFO: No cryptographic keys generated"
+if [[ "$MODE" == "--generate" ]]; then
+  echo "INFO: AGE recipient generated or reused"
+else
+  echo "INFO: No cryptographic keys generated"
+fi
 echo "INFO: No secrets transferred or modified"

@@ -100,9 +100,8 @@ code = int(matches[0])
 if code == 0:
     print("PASS: Secret exists, enabled and readable")
 elif code == 3:
-    raise SystemExit(
-        "MISSING: Secret not found. Restore requires review."
-    )
+    print("MISSING: Secret not found. Restore requires review.")
+    raise SystemExit(3)
 else:
     raise SystemExit(
         f"ERROR: Remote secret inspection failed (code {code})"
