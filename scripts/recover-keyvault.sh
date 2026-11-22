@@ -2,12 +2,14 @@
 set -euo pipefail
 
 MODE="${1:---dry-run}"
-[[ $# -le 1 &&
-   ( "$MODE" == "--dry-run" ||
-     "$MODE" == "--check-target" ) ]] || {
-  echo "Usage: $0 [--dry-run|--check-target]"
+
+if [[ $# -gt 1 ]] ||
+   [[ "$MODE" != "--dry-run" &&
+      "$MODE" != "--check-target" &&
+      "$MODE" != "--inspect-target" ]]; then
+  echo "Usage: $0 [--dry-run|--check-target|--inspect-target]"
   exit 2
-}
+fi
 
 RG="rg-learningsteps-devsecops"
 VAULT="kv-lsteps-305c3ba6"
@@ -143,6 +145,71 @@ assert isinstance(ip, ipaddress.IPv4Address)
 assert ip.is_private
 print(f"PASS: Private DNS points to {ip}")
 PY
+
+# ----------------------------------------------------
+# Read-only Key Vault recovery target inspection
+# ----------------------------------------------------
+
+if [[ "$MODE" == "--inspect-target" ]]; then
+
+  echo "[INSPECT] Inspecting Key Vault recovery target"
+
+  export CURRENT_JSON ORIGINAL
+
+  python3 - <<'PY'
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+
+original = json.loads(
+    Path(os.environ["ORIGINAL"]).read_text()
+)
+
+current = json.loads(os.environ["CURRENT_JSON"])
+
+def parse_timestamp(value):
+    if not value:
+        raise SystemExit(
+            "ERROR: Missing creation timestamp"
+        )
+    return datetime.fromisoformat(
+        value.replace("Z", "+00:00")
+    )
+
+original_created = parse_timestamp(
+    original["createdAt"]
+)
+
+current_created = parse_timestamp(
+    (current.get("systemData") or {}).get("createdAt")
+)
+
+same_generation = original_created == current_created
+
+properties = current["properties"]
+
+print("Vault:", current["name"])
+print("Creation timestamp matches original:", same_generation)
+print("Public access:", properties.get("publicNetworkAccess"))
+print("RBAC enabled:", properties.get("enableRbacAuthorization"))
+
+if same_generation:
+    print(
+        "INFO: Vault may be original or recovered from soft delete"
+    )
+else:
+    print(
+        "INFO: Vault creation timestamp differs from original"
+    )
+
+print("INFO: Secret existence has not been verified")
+print("INFO: No authorization to modify secrets")
+PY
+
+  echo
+  echo "PASS: Read-only target inspection completed"
+fi
 
 if [[ "$MODE" == "--check-target" ]]; then
   echo "[SECURITY] Checking recovery target"
