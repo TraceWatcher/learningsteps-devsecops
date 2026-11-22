@@ -15,8 +15,10 @@ WEB_TAG="v0.6.0-recovery"
 MODE="${1:---dry-run}"
 
 if [[ $# -gt 1 ]] ||
-   [[ "$MODE" != "--dry-run" && "$MODE" != "--build" ]]; then
-  echo "Usage: $0 [--dry-run|--build]"
+   [[ "$MODE" != "--dry-run" &&
+      "$MODE" != "--build" &&
+      "$MODE" != "--push" ]]; then
+  echo "Usage: $0 [--dry-run|--build|--push]"
   exit 2
 fi
 
@@ -100,6 +102,229 @@ echo "PASS: Image recovery preflight completed"
 if [[ "$MODE" == "--dry-run" ]]; then
   echo "No Docker images were built or pushed."
   echo "No Azure or Kubernetes resources were modified."
+  exit 0
+fi
+
+# ----------------------------------------------------
+# Guarded ACR recovery push
+# ----------------------------------------------------
+
+if [[ "$MODE" == "--push" ]]; then
+  echo "[PUSH 1/6] Verifying target ACR generation"
+
+  ORIGINAL_ACR_FILE="$HOME/learningsteps-recovery/original-acr.json"
+
+  [[ -s "$ORIGINAL_ACR_FILE" ]] || {
+    echo "ERROR: Original ACR reference missing"
+    exit 1
+  }
+
+  ACR_NAME="${ACR%%.*}"
+
+verify_acr_generation() {
+  local current_acr_json
+
+  current_acr_json="$(az acr show \
+    --name "$ACR_NAME" \
+    --resource-group "$RESOURCE_GROUP" \
+    -o json)"
+
+  CURRENT_ACR_JSON="$current_acr_json" \
+  ORIGINAL_ACR_FILE="$ORIGINAL_ACR_FILE" \
+  EXPECTED_ACR="$ACR" \
+  python3 - <<'PY'
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+
+original = json.loads(
+    Path(os.environ["ORIGINAL_ACR_FILE"]).read_text()
+)
+
+current = json.loads(os.environ["CURRENT_ACR_JSON"])
+
+def timestamp(value):
+    if not isinstance(value, str) or not value:
+        raise ValueError("ACR creation timestamp missing")
+
+    return datetime.fromisoformat(
+        value.replace("Z", "+00:00")
+    )
+
+if current["loginServer"] != os.environ["EXPECTED_ACR"]:
+    raise SystemExit("ERROR: Unexpected ACR login server")
+
+if current["provisioningState"] != "Succeeded":
+    raise SystemExit("ERROR: Target ACR is not ready")
+
+if current["adminUserEnabled"] is not False:
+    raise SystemExit("ERROR: ACR admin account is enabled")
+
+if timestamp(current["creationDate"]) == timestamp(
+    original["createdAt"]
+):
+    raise SystemExit(
+        "ERROR: Original ACR detected. Push prohibited."
+    )
+
+print("PASS: Target ACR generation verified")
+PY
+}
+
+verify_acr_generation
+
+  echo "[PUSH 2/6] Verifying local images"
+
+  LOCAL_API_IMAGE="learningsteps-recovery-api:$API_TAG"
+  LOCAL_WEB_IMAGE="learningsteps-recovery-web:$WEB_TAG"
+
+  API_ID="$(docker image inspect \
+    --format '{{.Id}}' "$LOCAL_API_IMAGE")"
+
+  WEB_ID="$(docker image inspect \
+    --format '{{.Id}}' "$LOCAL_WEB_IMAGE")"
+
+  echo "API Image ID: $API_ID"
+  echo "Web Image ID: $WEB_ID"
+
+  echo "[PUSH 3/6] Running mandatory security scans"
+
+  command -v trivy >/dev/null || {
+    echo "ERROR: Trivy is required"
+    exit 1
+  }
+
+  for image in "$LOCAL_API_IMAGE" "$LOCAL_WEB_IMAGE"; do
+    trivy image \
+      --scanners vuln \
+      --severity HIGH,CRITICAL \
+      --exit-code 1 \
+      --ignore-unfixed=false \
+      "$image"
+  done
+
+  [[ "$(docker image inspect --format '{{.Id}}' \
+      "$LOCAL_API_IMAGE")" == "$API_ID" ]] || {
+    echo "ERROR: API image changed during scan"
+    exit 1
+  }
+
+  [[ "$(docker image inspect --format '{{.Id}}' \
+      "$LOCAL_WEB_IMAGE")" == "$WEB_ID" ]] || {
+    echo "ERROR: Web image changed during scan"
+    exit 1
+  }
+
+  echo "PASS: Images passed security checks"
+
+  API_TARGET="$ACR/learningsteps-api:$API_TAG"
+  WEB_TARGET="$ACR/learningsteps-web:$WEB_TAG"
+
+  check_remote_tags() {
+    local repositories repository tag tags
+
+    repositories="$(az acr repository list \
+      --name "$ACR_NAME" -o json)"
+
+    for specification in \
+      "learningsteps-api:$API_TAG" \
+      "learningsteps-web:$WEB_TAG"; do
+
+      repository="${specification%%:*}"
+      tag="${specification#*:}"
+
+      if python3 -c \
+        'import json,sys; sys.exit(0 if sys.argv[1] in json.load(sys.stdin) else 1)' \
+        "$repository" <<< "$repositories"; then
+
+        tags="$(az acr repository show-tags \
+          --name "$ACR_NAME" \
+          --repository "$repository" \
+          -o json)"
+
+        if python3 -c \
+          'import json,sys; sys.exit(0 if sys.argv[1] in json.load(sys.stdin) else 1)' \
+          "$tag" <<< "$tags"; then
+          echo "ERROR: Target tag already exists: $repository:$tag"
+          return 1
+        fi
+      fi
+    done
+
+    echo "PASS: Target image tags are not present"
+  }
+
+  echo "[PUSH 4/6] Checking target tags"
+  check_remote_tags
+
+  echo
+  echo "ACR RECOVERY PUSH"
+  echo "Registry: $ACR"
+  echo "API:      $API_TARGET"
+  echo "Web:      $WEB_TARGET"
+  echo
+
+  if [[ ! -t 0 ]]; then
+    echo "ERROR: Interactive confirmation required"
+    exit 1
+  fi
+
+  read -r -p \
+    "Type 'PUSH RECOVERY IMAGES' to continue: " CONFIRMATION
+
+  if [[ "$CONFIRMATION" != "PUSH RECOVERY IMAGES" ]]; then
+    echo "Push cancelled"
+    exit 1
+  fi
+
+  echo "[PUSH 5/6] Authenticating and uploading"
+
+  echo "[SECURITY] Rechecking Azure subscription"
+
+  CURRENT_SUBSCRIPTION="$(az account show --query id -o tsv)"
+
+  if [[ "$CURRENT_SUBSCRIPTION" != "$EXPECTED_SUBSCRIPTION" ]]; then
+    echo "ERROR: Azure subscription changed"
+    exit 1
+  fi
+
+  echo "[SECURITY] Rechecking target ACR generation"
+  verify_acr_generation
+
+  az acr login --name "$ACR_NAME"
+
+  echo "[SECURITY] Rechecking target tags"
+  check_remote_tags
+
+  docker tag "$API_ID" "$API_TARGET"
+  docker tag "$WEB_ID" "$WEB_TARGET"
+
+  [[ "$(docker image inspect --format '{{.Id}}' \
+      "$API_TARGET")" == "$API_ID" ]] || exit 1
+
+  [[ "$(docker image inspect --format '{{.Id}}' \
+      "$WEB_TARGET")" == "$WEB_ID" ]] || exit 1
+
+  docker push "$API_TARGET"
+  docker push "$WEB_TARGET"
+
+  echo "[PUSH 6/6] Reading registry digests"
+
+  az acr repository show \
+    --name "$ACR_NAME" \
+    --image "learningsteps-api:$API_TAG" \
+    --query '{digest:digest,createdTime:createdTime}' \
+    -o json
+
+  az acr repository show \
+    --name "$ACR_NAME" \
+    --image "learningsteps-web:$WEB_TAG" \
+    --query '{digest:digest,createdTime:createdTime}' \
+    -o json
+
+  echo
+  echo "PASS: Recovery images pushed to ACR"
   exit 0
 fi
 
