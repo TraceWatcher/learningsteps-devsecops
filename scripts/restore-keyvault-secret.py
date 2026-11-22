@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import hmac
 import json
 import subprocess
 import sys
@@ -51,6 +52,61 @@ def get_identity_token():
 
     with opener.open(request, timeout=20) as response:
         return json.load(response)["access_token"]
+
+
+
+def restore_missing_secret(url, token, identity, encrypted_password):
+    """Restore after externally authorized target and RBAC checks.
+
+    Not exposed through the command-line restore guard.
+    """
+    result = subprocess.run(
+        [
+            "age", "--decrypt",
+            "--identity", identity,
+            encrypted_password,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+
+    password = result.stdout
+
+    if not password or b"\\x00" in password:
+        raise RuntimeError("Invalid recovery password")
+
+    password_text = password.decode("utf-8")
+
+    print("RESTORE: Writing missing Key Vault secret")
+
+    request_json(
+        url,
+        token,
+        method="PUT",
+        payload={
+            "value": password_text,
+            "attributes": {"enabled": True},
+        },
+    )
+
+    print("VERIFY: Reading restored secret")
+
+    verified = request_json(url, token)
+
+    value = verified.get("value")
+    enabled = verified.get("attributes", {}).get("enabled")
+
+    if enabled is not True or not isinstance(value, str):
+        raise RuntimeError("Restored secret is not readable and enabled")
+
+    if not hmac.compare_digest(
+        password, value.encode("utf-8")
+    ):
+        raise RuntimeError("Restored secret value mismatch")
+
+    print("PASS: Restored secret matches encrypted backup")
+    return 0
 
 
 def main():
@@ -106,44 +162,9 @@ def main():
         print("DRY RUN: No secret will be created")
         return 3
 
-    print("[3/4] Decrypting recovery password")
-
-    result = subprocess.run(
-        [
-            "age",
-            "--decrypt",
-            "--identity",
-            args.identity,
-            args.encrypted_password,
-        ],
-        capture_output=True,
-        check=True,
+    return restore_missing_secret(
+        url, token, args.identity, args.encrypted_password
     )
-
-    password = result.stdout
-
-    if not password or b"\x00" in password:
-        raise RuntimeError("Invalid recovered password")
-
-    # PostgreSQL password must be valid UTF-8.
-    password_text = password.decode("utf-8")
-
-    print("[4/4] Creating Key Vault secret")
-
-    request_json(
-        url,
-        token,
-        method="PUT",
-        payload={
-            "value": password_text,
-            "attributes": {"enabled": True},
-        },
-    )
-
-    print("PASS: Key Vault secret created")
-    print("PASS: No password or token printed")
-    return 0
-
 
 if __name__ == "__main__":
     try:
