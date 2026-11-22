@@ -47,7 +47,9 @@ for field in ("recovery_id", "principal_id", "vm_id"):
 aid = s["assignment_id"]
 name = str(uuid.UUID(aid.rsplit("/", 1)[-1]))
 
-if s["role"] != role or s["status"] not in ("prepared", "granted"):
+if s["role"] != role or s["status"] not in (
+    "prepared", "granted", "removed"
+):
     raise SystemExit("ERROR: Unexpected RBAC state")
 
 if not s["vault_id"].lower().endswith(
@@ -136,14 +138,67 @@ case "$MATCH_RC" in
     ;;
 esac
 
+
 if [[ "$MODE" == "status" ]]; then
+  LOCAL_STATUS="$(python3 - "$STATE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    state = json.load(f)
+
+print(state["status"])
+PY
+)"
+
+  echo "Local RBAC state: $LOCAL_STATUS"
+
   if [[ "$MATCH_RC" -eq 10 ]]; then
-    echo "PRESENT: Matching temporary RBAC assignment"
+    echo "Azure RBAC state: present and matching"
+
+    case "$LOCAL_STATUS" in
+      prepared)
+        echo "RECONCILE: Azure grant exists but local state is prepared"
+        echo "INFO: State can be reconciled after review"
+        exit 3
+        ;;
+      granted)
+        echo "PASS: Azure and local RBAC states agree"
+        ;;
+      removed)
+        echo "ERROR: Assignment exists despite removed state" >&2
+        exit 1
+        ;;
+      *)
+        echo "ERROR: Invalid local state" >&2
+        exit 1
+        ;;
+    esac
   else
-    echo "ABSENT: No matching temporary RBAC assignment"
+    echo "Azure RBAC state: absent"
+
+    case "$LOCAL_STATUS" in
+      prepared)
+        echo "PASS: No Azure assignment created yet"
+        ;;
+      granted)
+        echo "RECONCILE: Assignment absent but local state is granted"
+        echo "INFO: Verify removal before changing local state"
+        exit 3
+        ;;
+      removed)
+        echo "PASS: Azure and local RBAC states agree"
+        ;;
+      *)
+        echo "ERROR: Invalid local state" >&2
+        exit 1
+        ;;
+    esac
   fi
+
   exit 0
 fi
+
 
 if [[ "$MODE" == "grant" ]]; then
   echo "[SECURITY] Validating new recovery environment"
