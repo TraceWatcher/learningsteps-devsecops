@@ -49,6 +49,7 @@ def main():
             "review it before continuing"
         )
 
+    recovery_id = str(uuid.uuid4())
     assignment_name = str(uuid.uuid4())
     assignment_id = (
         args.vault_id.rstrip("/")
@@ -58,6 +59,7 @@ def main():
     )
 
     state = {
+        "recovery_id": recovery_id,
         "assignment_id": assignment_id,
         "vault_id": args.vault_id,
         "principal_id": args.principal_id,
