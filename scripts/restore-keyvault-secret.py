@@ -127,7 +127,7 @@ def restore_missing_secret(
 
     print("RESTORE: Writing missing Key Vault secret")
 
-    request_json(
+    created = request_json(
         url,
         token,
         method="PUT",
@@ -137,9 +137,48 @@ def restore_missing_secret(
         },
     )
 
-    print("VERIFY: Reading restored secret")
+    # Verify the exact secret version created by this PUT.
+    created_id = created.get("id")
 
-    verified = request_json(url, token)
+    if not isinstance(created_id, str):
+        raise RuntimeError("Key Vault did not return a secret ID")
+
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(created_id)
+    expected_host = f"{vault}.vault.azure.net"
+
+    if (
+        parts.scheme != "https"
+        or parts.hostname != expected_host
+        or parts.username is not None
+        or parts.password is not None
+        or parts.port is not None
+        or parts.query
+        or parts.fragment
+    ):
+        raise RuntimeError("Unexpected Key Vault secret URL")
+
+    segments = parts.path.strip("/").split("/")
+
+    if (
+        len(segments) != 3
+        or segments[0] != "secrets"
+        or segments[1] != "postgres-admin-password"
+        or not segments[2]
+        or not all(c in "0123456789abcdefABCDEF"
+                   for c in segments[2])
+    ):
+        raise RuntimeError("Invalid restored secret version")
+
+    version_url = created_id + "?api-version=7.4"
+
+    print("VERIFY: Reading exact restored secret version")
+
+    verified = request_json(version_url, token)
+
+    if verified.get("id") != created_id:
+        raise RuntimeError("Restored secret version mismatch")
 
     value = verified.get("value")
     enabled = verified.get("attributes", {}).get("enabled")
