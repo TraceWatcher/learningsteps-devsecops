@@ -49,11 +49,50 @@ if [[ "$MODE" == "--plan" ]]; then
   exit 0
 fi
 
+
+# Prevent concurrent recovery runs on this host.
+# Keep the file descriptor open until the process exits.
+LOCK_DIR="$HOME/learningsteps-recovery"
+
+if [[ ! -d "$LOCK_DIR" ||
+      -L "$LOCK_DIR" ]]; then
+  echo "ERROR: Unsafe recovery lock directory" >&2
+  exit 1
+fi
+
+if [[ "$(stat -c %u "$LOCK_DIR")" != "$(id -u)" ||
+      "$(stat -c %a "$LOCK_DIR")" != "700" ]]; then
+  echo "ERROR: Unsafe recovery lock directory permissions" >&2
+  exit 1
+fi
+
+LOCK_FILE="$LOCK_DIR/.recovery.lock"
+
+if [[ -e "$LOCK_FILE" || -L "$LOCK_FILE" ]]; then
+  if [[ -L "$LOCK_FILE" ||
+        ! -f "$LOCK_FILE" ||
+        "$(stat -c %u "$LOCK_FILE")" != "$(id -u)" ||
+        "$(stat -c %a "$LOCK_FILE")" != "600" ]]; then
+    echo "ERROR: Unsafe recovery lock file" >&2
+    exit 1
+  fi
+fi
+
+exec 8>>"$LOCK_FILE"
+
+if ! flock -n 8; then
+  echo "ERROR: Another recovery process is running" >&2
+  exit 75
+fi
+
+echo "PASS: Exclusive local recovery lock acquired"
+
+
 # The test backend cannot invoke Azure commands.
 # These operations will later be wired to the existing
 # guarded transport, RBAC, and remote-restore scripts.
 
-test_operation() {
+mock_operation() {
   local step="$1"
 
   echo "MOCK: $step"
@@ -70,6 +109,20 @@ test_operation() {
   esac
 
   return 0
+}
+
+run_operation() {
+  local operation="$1"
+
+  case "$MODE" in
+    --test)
+      mock_operation "$operation"
+      ;;
+    *)
+      echo "ERROR: Live recovery backend is disabled" >&2
+      return 2
+      ;;
+  esac
 }
 
 GRANT_ATTEMPTED=0
@@ -89,7 +142,7 @@ cleanup() {
   CLEANUP_ATTEMPTED=1
   echo "[CLEANUP] Removing temporary RBAC assignment"
 
-  if test_operation cleanup; then
+  if run_operation cleanup; then
     CLEANUP_RC=0
     echo "PASS: RBAC cleanup confirmed"
   else
@@ -134,16 +187,16 @@ trap 'exit 143' TERM
 echo "LearningSteps Recovery – MOCK MODE"
 echo "Scenario: $SCENARIO"
 
-test_operation preflight
-test_operation transport
-test_operation install
+run_operation preflight
+run_operation transport
+run_operation install
 
 # From this point onward, a grant may exist even if
 # the grant operation returns an error.
 GRANT_ATTEMPTED=1
-test_operation grant
+run_operation grant
 
-test_operation restore
-test_operation verify
+run_operation restore
+run_operation verify
 
 # EXIT trap handles RBAC cleanup for success and failure.
