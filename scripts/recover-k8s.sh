@@ -201,7 +201,7 @@ replace_pattern(
     r'^([ \t]*image:[ \t]*)\S+/learningsteps-web:\S+',
     lambda m: (
         f"{m.group(1)}"
-        f"{registry}/learningsteps-web:v0.6.0"
+        f"{registry}/learningsteps-web:v0.6.0-recovery"
     )
 )
 
