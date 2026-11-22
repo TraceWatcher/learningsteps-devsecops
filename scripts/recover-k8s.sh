@@ -21,7 +21,7 @@ if [[ $# -gt 1 ]] ||
   exit 2
 fi
 
-for tool in az kubectl terraform python3; do
+for tool in az kubectl terraform python3 kubeconform; do
   command -v "$tool" >/dev/null || {
     echo "ERROR: Missing dependency: $tool"
     exit 1
@@ -225,6 +225,14 @@ print(f"ACR: {registry}")
 PY
 
 echo "[6/6] Validating manifests"
+
+echo "[VALIDATION] Checking Kubernetes schemas and YAML"
+
+kubeconform \
+  -strict \
+  -summary \
+  -ignore-missing-schemas \
+  "$OUT_DIR/"
 
 kubectl create \
   --dry-run=client \
