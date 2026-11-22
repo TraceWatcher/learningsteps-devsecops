@@ -200,7 +200,7 @@ with tempfile.TemporaryDirectory(prefix="ls-rbac-test-") as temp:
     def writes():
         return log_file.read_text().splitlines()
 
-    print("[1/7] New grant")
+    print("[1/10] New grant")
     reset()
     result = run("grant")
     assert result.returncode == 0, result.stdout + result.stderr
@@ -209,13 +209,13 @@ with tempfile.TemporaryDirectory(prefix="ls-rbac-test-") as temp:
     assert len(json.loads(remote_file.read_text())) == 1
     print("PASS: Role created and grant persisted")
 
-    print("[2/7] Repeat grant")
+    print("[2/10] Repeat grant")
     result = run("grant")
     assert result.returncode == 0, result.stdout + result.stderr
     assert writes() == ["CREATE"]
     print("PASS: Existing grant reused without another CREATE")
 
-    print("[3/7] Cleanup")
+    print("[3/10] Cleanup")
     result = run("cleanup", "REMOVE\n")
     assert result.returncode == 0, result.stdout + result.stderr
     assert status() == "removed"
@@ -223,19 +223,19 @@ with tempfile.TemporaryDirectory(prefix="ls-rbac-test-") as temp:
     assert writes() == ["CREATE", "DELETE"]
     print("PASS: Role removed and cleanup persisted")
 
-    print("[4/7] Repeat cleanup")
+    print("[4/10] Repeat cleanup")
     result = run("cleanup")
     assert result.returncode == 0, result.stdout + result.stderr
     assert writes() == ["CREATE", "DELETE"]
     print("PASS: Cleanup is idempotent")
 
-    print("[5/7] Reject grant after removed")
+    print("[5/10] Reject grant after removed")
     result = run("grant")
     assert result.returncode != 0
     assert writes() == ["CREATE", "DELETE"]
     print("PASS: Completed recovery cannot grant again")
 
-    print("[6/7] Reject wrong principal")
+    print("[6/10] Reject wrong principal")
     reset(records=[{
         "id": assignment,
         "scope": VAULT,
@@ -247,7 +247,7 @@ with tempfile.TemporaryDirectory(prefix="ls-rbac-test-") as temp:
     assert writes() == []
     print("PASS: Identity mismatch prevents DELETE")
 
-    print("[7/7] Reject grant on failed recovery preflight")
+    print("[7/10] Reject grant on failed recovery preflight")
     reset()
     env["MOCK_PREFLIGHT"] = "reject"
     result = run("grant")
@@ -255,5 +255,40 @@ with tempfile.TemporaryDirectory(prefix="ls-rbac-test-") as temp:
     assert writes() == []
     assert status() == "prepared"
     print("PASS: Failed preflight prevents CREATE")
+
+    print("[8/10] Automatic cleanup after confirmed grant")
+    reset(status="granted", records=[{
+        "id": assignment,
+        "scope": VAULT,
+        "principalId": principal,
+        "roleDefinitionId": ROLE,
+    }])
+    result = run("cleanup-auto")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert status() == "removed"
+    assert json.loads(remote_file.read_text()) == []
+    assert writes() == ["DELETE"]
+    print("PASS: Automatic cleanup removed confirmed assignment")
+
+    print("[9/10] Reject automatic cleanup without grant")
+    reset(status="prepared")
+    result = run("cleanup-auto")
+    assert result.returncode != 0
+    assert status() == "prepared"
+    assert writes() == []
+    print("PASS: Automatic cleanup rejected unconfirmed grant")
+
+    print("[10/10] Reject inconsistent removed state")
+    reset(status="removed", records=[{
+        "id": assignment,
+        "scope": VAULT,
+        "principalId": principal,
+        "roleDefinitionId": ROLE,
+    }])
+    result = run("cleanup-auto")
+    assert result.returncode != 0
+    assert writes() == []
+    assert len(json.loads(remote_file.read_text())) == 1
+    print("PASS: Inconsistent RBAC state blocked")
 
 print("PASS: All RBAC lifecycle integration tests completed")

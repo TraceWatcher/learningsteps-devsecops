@@ -10,8 +10,8 @@ VAULT="kv-lsteps-305c3ba6"
 ROLE="Key Vault Secrets Officer"
 MODE="${1:-}"
 
-if [[ $# -ne 1 ]] || [[ ! "$MODE" =~ ^(status|grant|cleanup)$ ]]; then
-  echo "Usage: $0 {status|grant|cleanup}" >&2
+if [[ $# -ne 1 ]] || [[ ! "$MODE" =~ ^(status|grant|cleanup|cleanup-auto)$ ]]; then
+  echo "Usage: $0 {status|grant|cleanup|cleanup-auto}" >&2
   exit 2
 fi
 
@@ -325,17 +325,46 @@ fi
 
 
 # Cleanup must work even if the recovery VM no longer exists.
-if [[ "$MODE" == "cleanup" ]]; then
+if [[ "$MODE" == "cleanup" ||
+      "$MODE" == "cleanup-auto" ]]; then
+
+  LOCAL_STATUS="$(python3 - "$STATE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    print(json.load(f)["status"])
+PY
+)"
+
+  if [[ "$LOCAL_STATUS" == "removed" &&
+        "$MATCH_RC" -eq 10 ]]; then
+    echo "ERROR: Azure assignment exists despite removed state" >&2
+    echo "STOP: Manual reconciliation required" >&2
+    exit 3
+  fi
+
+  if [[ "$MODE" == "cleanup-auto" ]]; then
+    if [[ "$LOCAL_STATUS" != "granted" ||
+          "$MATCH_RC" -ne 10 ]]; then
+      echo "ERROR: Automatic cleanup requires a confirmed grant" >&2
+      exit 3
+    fi
+  fi
 
   if [[ "$MATCH_RC" -eq 10 ]]; then
     echo "[CLEANUP] Matching Azure assignment found"
     echo "Assignment: $ASSIGNMENT_ID"
 
-    read -r -p "Type REMOVE to confirm: " CONFIRM
+    if [[ "$MODE" == "cleanup" ]]; then
+      read -r -p "Type REMOVE to confirm: " CONFIRM
 
-    if [[ "$CONFIRM" != "REMOVE" ]]; then
-      echo "ERROR: Cleanup cancelled" >&2
-      exit 1
+      if [[ "$CONFIRM" != "REMOVE" ]]; then
+        echo "ERROR: Cleanup cancelled" >&2
+        exit 1
+      fi
+    else
+      echo "AUTO-CLEANUP: Confirmed temporary RBAC grant"
     fi
 
     az role assignment delete \
