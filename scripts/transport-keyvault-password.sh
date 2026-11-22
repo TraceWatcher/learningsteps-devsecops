@@ -85,7 +85,6 @@ set +e
   TARGET="\$DIR/postgres-admin-password.age"
 
   test -f "\$DIR/recipient-identity.txt"
-  test ! -e "\$TARGET"
 
   TMP="\$(mktemp "\$DIR/.password-XXXXXXXX")"
   trap 'rm -f -- "\$TMP"' EXIT
@@ -102,6 +101,41 @@ set +e
     "\$TMP"
 
   chmod 600 "\$TMP"
+
+  if test -e "\$TARGET" || test -L "\$TARGET"; then
+    test ! -L "\$TARGET"
+    test -f "\$TARGET"
+    test "\$(stat -c %u "\$TARGET")" = "0"
+    test "\$(stat -c %a "\$TARGET")" = "600"
+
+    python3 -c '
+import hmac
+import subprocess
+import sys
+
+identity, existing, incoming = sys.argv[1:]
+
+def decrypt(path):
+    result = subprocess.run(
+        ["age", "--decrypt", "--identity", identity, path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    return result.stdout
+
+old = decrypt(existing)
+new = decrypt(incoming)
+
+if not old or not hmac.compare_digest(old, new):
+    raise SystemExit("ERROR: Existing recovery password differs")
+
+print("PASS: Existing encrypted password verified")
+' "\$DIR/recipient-identity.txt" "\$TARGET" "\$TMP"
+
+    echo "PASS: Existing encrypted password retained"
+    exit 0
+  fi
 
   ln "\$TMP" "\$TARGET"
 
@@ -165,7 +199,12 @@ codes = re.findall(
 if codes != ["0"]:
     raise SystemExit("ERROR: Remote transport failed")
 
-if "PASS: Encrypted password stored" not in stdout:
+success_messages = (
+    "PASS: Encrypted password stored",
+    "PASS: Existing encrypted password retained",
+)
+
+if not any(message in stdout for message in success_messages):
     raise SystemExit("ERROR: Missing transport confirmation")
 
 print("PASS: VM identity unchanged")
