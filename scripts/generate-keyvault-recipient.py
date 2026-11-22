@@ -22,10 +22,37 @@ def main():
     with open(LOCK_FILE, "a+b") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
 
-        if KEY_FILE.exists() or KEY_FILE.is_symlink():
-            raise RuntimeError(
-                "Recipient identity already exists"
+        if KEY_FILE.is_symlink():
+            raise RuntimeError("Recipient identity must not be a symlink")
+
+        if KEY_FILE.exists():
+            stat = KEY_FILE.stat()
+
+            if not KEY_FILE.is_file():
+                raise RuntimeError("Recipient identity is not a regular file")
+
+            if stat.st_uid != 0 or stat.st_mode & 0o077:
+                raise RuntimeError("Unsafe recipient identity permissions")
+
+            result = subprocess.run(
+                ["age-keygen", "-y", str(KEY_FILE)],
+                capture_output=True,
+                text=True,
+                check=True,
             )
+
+            recipient = result.stdout.strip()
+
+            if not re.fullmatch(
+                r"age1[023456789acdefghjklmnpqrstuvwxyz]+",
+                recipient,
+            ):
+                raise RuntimeError("Invalid existing AGE recipient")
+
+            print("PASS: Existing recipient identity reused")
+            print("RECIPIENT=" + recipient)
+            print("PASS: Private identity retained on VM")
+            return
 
         with tempfile.TemporaryDirectory(
             prefix=".recipient-",
