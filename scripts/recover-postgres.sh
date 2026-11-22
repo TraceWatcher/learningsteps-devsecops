@@ -22,8 +22,9 @@ MODE="${1:---dry-run}"
 if [[ $# -gt 1 ]] ||
    [[ "$MODE" != "--dry-run" &&
       "$MODE" != "--restore" &&
-      "$MODE" != "--check-target" ]]; then
-  echo "Usage: $0 [--dry-run|--check-target|--restore]"
+      "$MODE" != "--check-target" &&
+      "$MODE" != "--verify" ]]; then
+  echo "Usage: $0 [--dry-run|--check-target|--restore|--verify]"
   exit 2
 fi
 
@@ -111,7 +112,7 @@ CURRENT_UID="$(kubectl get namespace kube-system \
 }
 
 if [[ "$CURRENT_UID" == "$ORIGINAL_UID" ]]; then
-  if [[ "$MODE" == "--restore" ]]; then
+  if [[ "$MODE" == "--restore" || "$MODE" == "--verify" ]]; then
     echo "ERROR: Original AKS cluster detected."
     echo "Database restore is prohibited on the original cluster."
     exit 1
@@ -203,7 +204,9 @@ else
   echo "Preflight completed. Database has not been modified."
 fi
 
-if [[ "$MODE" == "--check-target" || "$MODE" == "--restore" ]]; then
+if [[ "$MODE" == "--check-target" ||
+      "$MODE" == "--restore" ||
+      "$MODE" == "--verify" ]]; then
   echo
   echo "[TARGET CHECK] Preparing PostgreSQL client"
 
@@ -267,6 +270,30 @@ POD_CREATED=true
     --for=condition=Ready \
     "pod/$CLIENT_POD" \
     --timeout=120s
+
+  if [[ "$MODE" == "--verify" ]]; then
+    echo "[VERIFY] Checking restored PostgreSQL data"
+
+    {
+      printf '%s\n' \
+        'set -eu' \
+        'export PGPASSWORD="$(cat /mnt/secrets/postgres-admin-password)"' \
+        'export PGOPTIONS="-c default_transaction_read_only=on"' \
+        'psql -X -v ON_ERROR_STOP=1 <<'\''SQL'\'''
+
+      cat "$ROOT/scripts/sql/verify-restored-database.sql"
+
+      printf '%s\n' 'SQL'
+    } | kubectl exec -i \
+        -n learningsteps \
+        "$CLIENT_POD" \
+        -- sh -s
+
+    echo
+    echo "PASS: PostgreSQL recovery verification completed"
+    echo "No database modifications were performed."
+    exit 0
+  fi
 
   echo "[TARGET CHECK] Checking database schema"
 
@@ -443,57 +470,21 @@ kubectl exec -i \
 
 echo "[RESTORE] Verifying restored data"
 
-kubectl exec \
-  -n learningsteps \
-  "$CLIENT_POD" \
-  -- sh -ec '
-    export PGPASSWORD="$(cat /mnt/secrets/postgres-admin-password)"
+{
+  printf '%s\n' \
+    'set -eu' \
+    'export PGPASSWORD="$(cat /mnt/secrets/postgres-admin-password)"' \
+    'export PGOPTIONS="-c default_transaction_read_only=on"' \
+    'psql -X -v ON_ERROR_STOP=1 <<'\''SQL'\'''
 
-    psql -X -v ON_ERROR_STOP=1 <<'\''SQL'\''
-DO $$
-DECLARE
-    entry_count integer;
-    constraint_count integer;
-    index_count integer;
-BEGIN
-    SELECT COUNT(*) INTO entry_count
-    FROM public.entries;
+  cat "$ROOT/scripts/sql/verify-restored-database.sql"
 
-    SELECT COUNT(*) INTO constraint_count
-    FROM pg_constraint
-    WHERE conrelid = '\''public.entries'\''::regclass
-      AND conname IN (
-        '\''entries_owner_required'\'',
-        '\''entries_pkey'\''
-      );
+  printf '%s\n' 'SQL'
+} | kubectl exec -i \
+    -n learningsteps \
+    "$CLIENT_POD" \
+    -- sh -s
 
-    SELECT COUNT(*) INTO index_count
-    FROM pg_indexes
-    WHERE schemaname = '\''public'\''
-      AND tablename = '\''entries'\''
-      AND indexname IN (
-        '\''idx_entries_created_at'\'',
-        '\''idx_entries_data_gin'\'',
-        '\''idx_entries_owner_created'\''
-      );
-
-    IF entry_count <> 4
-       OR constraint_count <> 2
-       OR index_count <> 3 THEN
-        RAISE EXCEPTION
-          '\''Restore verification failed: entries=%, constraints=%, indexes=%'\'',
-          entry_count, constraint_count, index_count;
-    END IF;
-
-    RAISE NOTICE
-      '\''PASS: entries=%, constraints=%, indexes=%'\'',
-      entry_count, constraint_count, index_count;
-END
-$$;
-SQL
-  '
-
-echo
 echo "PASS: PostgreSQL restore and basic integrity checks completed"
 exit 0
 fi
