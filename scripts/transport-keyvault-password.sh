@@ -84,7 +84,32 @@ set +e
   DIR="/var/lib/learningsteps-recovery"
   TARGET="\$DIR/postgres-admin-password.age"
 
-  test -f "\$DIR/recipient-identity.txt"
+  # Validate the recovery directory and private AGE identity.
+  test -d "\$DIR"
+  test ! -L "\$DIR"
+  test "\$(stat -c %u "\$DIR")" = "0"
+  test "\$(stat -c %a "\$DIR")" = "700"
+
+  IDENTITY="\$DIR/recipient-identity.txt"
+
+  test ! -L "\$IDENTITY"
+  test -f "\$IDENTITY"
+  test "\$(stat -c %u "\$IDENTITY")" = "0"
+  test "\$(stat -c %a "\$IDENTITY")" = "600"
+
+  # Serialize competing transports.
+  # Refuse an existing symlink or unexpected lock-file type.
+  LOCK="\$DIR/.transport.lock"
+
+  if test -e "\$LOCK" || test -L "\$LOCK"; then
+    test ! -L "\$LOCK"
+    test -f "\$LOCK"
+    test "\$(stat -c %u "\$LOCK")" = "0"
+    test "\$(stat -c %a "\$LOCK")" = "600"
+  fi
+
+  exec 9>>"\$LOCK"
+  flock -x 9
 
   TMP="\$(mktemp "\$DIR/.password-XXXXXXXX")"
   trap 'rm -f -- "\$TMP"' EXIT
