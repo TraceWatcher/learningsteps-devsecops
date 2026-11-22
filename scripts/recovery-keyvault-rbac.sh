@@ -201,6 +201,27 @@ fi
 
 
 if [[ "$MODE" == "grant" ]]; then
+  LOCAL_STATUS="$(python3 - "$STATE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    print(json.load(f)["status"])
+PY
+)"
+
+  if [[ "$LOCAL_STATUS" == "removed" ]]; then
+    echo "ERROR: Completed recovery cannot be granted again" >&2
+    exit 1
+  fi
+
+  if [[ "$LOCAL_STATUS" == "granted" &&
+        "$MATCH_RC" -eq 0 ]]; then
+    echo "ERROR: Local state is granted, but Azure assignment is absent" >&2
+    echo "STOP: Manual reconciliation required" >&2
+    exit 3
+  fi
+
   echo "[SECURITY] Validating new recovery environment"
 
   "$ROOT/scripts/prepare-keyvault-transport.sh"
@@ -246,29 +267,119 @@ PY
       -o none
   fi
 
-  echo "INFO: Grant submitted; verify with status"
-  echo "INFO: RBAC propagation may not yet be complete"
+  echo "[VERIFY] Reading Azure role assignment"
+
+  VERIFIED_ASSIGNMENT="$(az role assignment list \
+    --scope "$VAULT_ID" \
+    --all \
+    -o json)"
+
+  export VERIFIED_ASSIGNMENT
+
+  python3 - <<'PY'
+import json
+import os
+
+records = json.loads(os.environ["VERIFIED_ASSIGNMENT"])
+
+matches = [
+    item for item in records
+    if item.get("id", "").lower()
+    == os.environ["ASSIGNMENT_ID"].lower()
+]
+
+if len(matches) != 1:
+    raise SystemExit(
+        "ERROR: Assignment not uniquely confirmed by Azure"
+    )
+
+assignment = matches[0]
+
+expected = {
+    "principalId": os.environ["PRINCIPAL_ID"],
+    "scope": os.environ["VAULT_ID"],
+    "roleDefinitionId": os.environ["ROLE_ID"],
+}
+
+for field, value in expected.items():
+    actual = assignment.get(field)
+
+    if not isinstance(actual, str) or actual.lower() != value.lower():
+        raise SystemExit(
+            f"ERROR: Assignment verification failed: {field}"
+        )
+
+print("PASS: Azure role assignment identity verified")
+PY
+
+  echo "[STATE] Recording confirmed grant"
+
+  python3 "$ROOT/scripts/recovery-rbac-state.py" \
+    update --status granted
+
+  echo "PASS: Azure grant confirmed and recorded"
+  echo "INFO: RBAC propagation may still be pending"
   exit 0
 fi
 
-# Cleanup must also work if the recovery VM no longer exists.
+
+
+# Cleanup must work even if the recovery VM no longer exists.
 if [[ "$MODE" == "cleanup" ]]; then
-  if [[ "$MATCH_RC" -eq 0 ]]; then
-    echo "ABSENT: Assignment already removed"
-    exit 0
+
+  if [[ "$MATCH_RC" -eq 10 ]]; then
+    echo "[CLEANUP] Matching Azure assignment found"
+    echo "Assignment: $ASSIGNMENT_ID"
+
+    read -r -p "Type REMOVE to confirm: " CONFIRM
+
+    if [[ "$CONFIRM" != "REMOVE" ]]; then
+      echo "ERROR: Cleanup cancelled" >&2
+      exit 1
+    fi
+
+    az role assignment delete \
+      --ids "$ASSIGNMENT_ID"
+
+    echo "INFO: Azure deletion requested"
+  else
+    echo "INFO: Assignment already absent in Azure"
   fi
 
-  echo "Removing only verified assignment:"
-  echo "$ASSIGNMENT_ID"
+  echo "[VERIFY] Checking Azure assignment removal"
 
-  read -r -p "Type REMOVE to confirm: " CONFIRM
-  [[ "$CONFIRM" == "REMOVE" ]] || {
-    echo "Cancelled"
-    exit 1
-  }
+  AFTER_CLEANUP="$(az role assignment list \
+    --scope "$VAULT_ID" \
+    --all \
+    -o json)"
 
-  az role assignment delete --ids "$ASSIGNMENT_ID"
+  export AFTER_CLEANUP
 
-  echo "INFO: Delete requested"
-  echo "INFO: Run status again to verify removal"
+  python3 - <<'PY'
+import json
+import os
+
+records = json.loads(os.environ["AFTER_CLEANUP"])
+assignment_id = os.environ["ASSIGNMENT_ID"].lower()
+
+matches = [
+    item for item in records
+    if item.get("id", "").lower() == assignment_id
+]
+
+if matches:
+    raise SystemExit(
+        "ERROR: Temporary RBAC assignment still exists"
+    )
+
+print("PASS: Temporary assignment absent in Azure")
+PY
+
+  echo "[STATE] Recording confirmed removal"
+
+  python3 "$ROOT/scripts/recovery-rbac-state.py" \
+    update --status removed
+
+  echo "PASS: Temporary RBAC cleanup completed"
+  exit 0
 fi
