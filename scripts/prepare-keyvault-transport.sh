@@ -29,6 +29,21 @@ echo "[2/4] Verifying new maintenance VM"
 
 "$ROOT/scripts/check-recovery-vm.sh"
 
+echo "[SECURITY] Checking maintenance VM power state"
+
+VM_STATE="$(az vm get-instance-view \
+  --resource-group rg-learningsteps-devsecops \
+  --name learningsteps-maintenance \
+  --query 'instanceView.statuses[?starts_with(code, `PowerState/`)].code' \
+  -o tsv)"
+
+if [[ "$VM_STATE" != "PowerState/running" ]]; then
+  echo "ERROR: Recovery VM must be running"
+  exit 1
+fi
+
+echo "PASS: Recovery VM is running"
+
 echo "[3/4] Verifying PostgreSQL recovery target"
 
 "$ROOT/scripts/recover-postgres.sh" --check-target
