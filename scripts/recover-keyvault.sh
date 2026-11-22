@@ -2,8 +2,10 @@
 set -euo pipefail
 
 MODE="${1:---dry-run}"
-[[ $# -le 1 && "$MODE" == "--dry-run" ]] || {
-  echo "Usage: $0 [--dry-run]"
+[[ $# -le 1 &&
+   ( "$MODE" == "--dry-run" ||
+     "$MODE" == "--check-target" ) ]] || {
+  echo "Usage: $0 [--dry-run|--check-target]"
   exit 2
 }
 
@@ -141,6 +143,47 @@ assert isinstance(ip, ipaddress.IPv4Address)
 assert ip.is_private
 print(f"PASS: Private DNS points to {ip}")
 PY
+
+if [[ "$MODE" == "--check-target" ]]; then
+  echo "[SECURITY] Checking recovery target"
+
+  export CURRENT_JSON ORIGINAL
+
+  python3 - <<'PY'
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+
+original = json.loads(
+    Path(os.environ["ORIGINAL"]).read_text()
+)
+current = json.loads(os.environ["CURRENT_JSON"])
+
+def parse_timestamp(value):
+    if not value:
+        raise SystemExit("ERROR: Missing creation timestamp")
+    return datetime.fromisoformat(
+        value.replace("Z", "+00:00")
+    )
+
+original_created = parse_timestamp(original["createdAt"])
+current_created = parse_timestamp(
+    (current.get("systemData") or {}).get("createdAt")
+)
+
+if original_created == current_created:
+    raise SystemExit(
+        "ERROR: Original or recovered Key Vault detected.\n"
+        "Target is not approved for secret restoration."
+    )
+
+print("PASS: Key Vault creation timestamp differs")
+print("INFO: This is not yet authorization to restore secrets")
+PY
+
+  echo "PASS: Preliminary target check completed"
+fi
 
 echo
 echo "PASS: Key Vault recovery prerequisites checked"
