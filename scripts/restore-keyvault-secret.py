@@ -112,6 +112,19 @@ def restore_missing_secret(
 
     password_text = password.decode("utf-8")
 
+    # Recheck immediately before writing.
+    try:
+        request_json(url, token)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise RuntimeError(
+                f"Secret pre-write check failed: HTTP {exc.code}"
+            ) from None
+    else:
+        raise RuntimeError(
+            "Secret appeared before restore; refusing overwrite"
+        )
+
     print("RESTORE: Writing missing Key Vault secret")
 
     request_json(
