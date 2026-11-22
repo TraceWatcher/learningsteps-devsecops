@@ -7,6 +7,8 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import ipaddress
+import socket
 
 
 def request_json(url, token, method="GET", payload=None):
@@ -54,12 +56,44 @@ def get_identity_token():
         return json.load(response)["access_token"]
 
 
+def verify_private_endpoint(vault, private_ip):
+    """Require the expected private DNS resolution."""
 
-def restore_missing_secret(url, token, identity, encrypted_password):
+    expected = ipaddress.IPv4Address(private_ip)
+
+    if not expected.is_private:
+        raise RuntimeError("Expected endpoint IP is not private")
+
+    hostname = f"{vault}.vault.azure.net"
+
+    resolved = {
+        ipaddress.IPv4Address(item[4][0])
+        for item in socket.getaddrinfo(
+            hostname,
+            443,
+            family=socket.AF_INET,
+            type=socket.SOCK_STREAM,
+        )
+    }
+
+    if resolved != {expected}:
+        raise RuntimeError(
+            "Key Vault DNS does not match expected private endpoint"
+        )
+
+    print("PASS: Private Key Vault DNS verified")
+
+
+def restore_missing_secret(
+    url, token, identity, encrypted_password, vault, private_ip
+):
     """Restore after externally authorized target and RBAC checks.
 
     Not exposed through the command-line restore guard.
     """
+
+    verify_private_endpoint(vault, private_ip)
+
     result = subprocess.run(
         [
             "age", "--decrypt",
@@ -116,6 +150,7 @@ def main():
     parser.add_argument("--identity", required=True)
     parser.add_argument("--encrypted-password", required=True)
     parser.add_argument("--restore", action="store_true")
+    parser.add_argument("--private-ip")
 
     args = parser.parse_args()
 
@@ -163,7 +198,12 @@ def main():
         return 3
 
     return restore_missing_secret(
-        url, token, args.identity, args.encrypted_password
+        url,
+        token,
+        args.identity,
+        args.encrypted_password,
+        args.vault,
+        args.private_ip,
     )
 
 if __name__ == "__main__":
