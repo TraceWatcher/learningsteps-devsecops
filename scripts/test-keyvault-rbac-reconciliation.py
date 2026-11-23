@@ -125,4 +125,20 @@ test(
     ),
 )
 
-print("PASS: All 11 RBAC reconciliation scenarios completed")
+
+test(
+    "Role UUID with wrong subscription",
+    "granted",
+    True,
+    4,
+    change_assignment=lambda a: a.update(
+        roleDefinitionId=(
+            "/subscriptions/00000000-0000-0000-0000-000000000000"
+            "/providers/Microsoft.Authorization/roleDefinitions/"
+            + role_id
+        )
+    ),
+)
+
+
+print("PASS: All 12 RBAC reconciliation scenarios completed")

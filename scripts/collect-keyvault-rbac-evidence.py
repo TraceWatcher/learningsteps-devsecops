@@ -10,6 +10,12 @@ from pathlib import Path
 SUBSCRIPTION = "901cb597-1248-4bc6-8b92-0452114c48b9"
 ROLE_ID = "b86a8fe4-44ce-4948-aee5-eccb2c155cd7"
 
+VAULT_ID = (
+    f"/subscriptions/{SUBSCRIPTION}"
+    "/resourceGroups/rg-learningsteps-devsecops"
+    "/providers/Microsoft.KeyVault/vaults/kv-lsteps-305c3ba6"
+)
+
 ROOT = Path(__file__).resolve().parent
 
 spec = importlib.util.spec_from_file_location(
@@ -38,6 +44,14 @@ def azure_json(runner, *args):
 
 
 def collect(state, runner):
+    if not isinstance(state, dict):
+        raise ValueError("Invalid recovery state")
+
+    if not isinstance(state.get("vault_id"), str):
+        raise ValueError("Missing recovery Vault ID")
+
+    if state["vault_id"].casefold() != VAULT_ID.casefold():
+        raise ValueError("SECURITY: Unexpected recovery Vault scope")
     # Query account identity first.
     account = azure_json(runner, "account", "show", "-o", "json")
 
@@ -49,7 +63,7 @@ def collect(state, runner):
 
     # The scope comes from state, but reconciliation validates it.
     # Never infer missing assignments from a failed CLI request.
-    scope = state["vault_id"]
+    scope = VAULT_ID
 
     assignments = azure_json(
         runner,

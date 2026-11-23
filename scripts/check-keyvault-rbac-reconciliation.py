@@ -59,6 +59,13 @@ def reconcile(state, assignments, expected_role_id):
     parse_uuid(assignment_uuid)
 
     expected_role = parse_uuid(expected_role_id)
+    subscription = vault_id.split("/")[2]
+
+    expected_role_resource_id = (
+        f"/subscriptions/{subscription}"
+        "/providers/microsoft.authorization/roledefinitions/"
+        f"{expected_role}"
+    )
 
     matches = []
     suspicious = []
@@ -70,21 +77,22 @@ def reconcile(state, assignments, expected_role_id):
         entry_scope = norm(assignment["scope"])
         entry_principal = parse_uuid(assignment["principalId"])
         role_id = norm(assignment["roleDefinitionId"])
-        role_uuid = parse_uuid(role_id.split("/")[-1])
 
         same_assignment = entry_id == assignment_id
         same_identity_scope = (
             entry_scope == vault_id and entry_principal == principal
         )
 
+
         if same_assignment:
             require(
                 entry_scope == vault_id
                 and entry_principal == principal
-                and role_uuid == expected_role,
+                and role_id == expected_role_resource_id,
                 "SECURITY: Assignment fields do not match",
             )
             matches.append(assignment)
+
 
         elif same_identity_scope:
             suspicious.append(entry_id)

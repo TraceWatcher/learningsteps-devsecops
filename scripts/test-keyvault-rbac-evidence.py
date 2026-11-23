@@ -6,6 +6,7 @@ import json
 import pathlib
 import subprocess
 import uuid
+import copy
 
 ROOT = pathlib.Path(__file__).resolve().parent
 
@@ -141,4 +142,28 @@ test(
     {"unexpected": "object"}, 4,
 )
 
-print("PASS: All seven RBAC evidence scenarios completed")
+
+# A modified Vault scope must be rejected before any Azure query.
+tampered_state = copy.deepcopy(state)
+tampered_state["vault_id"] = (
+    vault.replace("kv-lsteps-305c3ba6", "unexpected-vault")
+)
+
+calls = []
+
+def forbidden_runner(command):
+    calls.append(command)
+    raise AssertionError("Azure CLI must not be called")
+
+try:
+    collector.collect(tampered_state, forbidden_runner)
+except ValueError as exc:
+    assert "Unexpected recovery Vault scope" in str(exc)
+else:
+    raise AssertionError("Tampered Vault scope was accepted")
+
+assert calls == [], "Azure CLI was invoked despite invalid scope"
+
+print("PASS: Tampered Vault rejected before Azure query")
+
+print("PASS: All eight RBAC evidence scenarios completed")
