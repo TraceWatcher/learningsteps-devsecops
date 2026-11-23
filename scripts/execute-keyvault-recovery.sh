@@ -202,16 +202,28 @@ integration_operation() {
       else
         payload="$payload_dir/restore.sh"
         command_mode="--restore"
+        local validated_ip
 
         [[ ! -e "$payload" && ! -L "$payload" ]] || {
           echo "ERROR: Restore payload already exists" >&2
           return 1
         }
 
+        validated_ip="$(
+          python3 \
+            "$INTEGRATION_ROOT/validate-keyvault-network.py" \
+            --snapshot "$INTEGRATION_ROOT/keyvault-network-snapshot.json"
+        )" || return 1
+
+        [[ -n "$validated_ip" ]] || {
+          echo "ERROR: Network validator returned no IP" >&2
+          return 1
+        }
+
         python3 \
           "$INTEGRATION_ROOT/build-keyvault-restore-payload.py" \
           --state "$HOME/learningsteps-recovery/temporary-keyvault-rbac.json" \
-          --private-ip "${LS_TEST_PRIVATE_IP:?}" \
+          --private-ip "$validated_ip" \
           --output "$payload"
       fi
 

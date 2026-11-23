@@ -195,6 +195,12 @@ CASES = {
         "granted",
         4,
     ),
+    "network-fails": (
+        1,
+        ["preflight", "transport", "install", "grant", "cleanup"],
+        "removed",
+        2,
+    ),
 }
 
 
@@ -224,8 +230,20 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
         "build-keyvault-restore-payload.py",
         "restore-keyvault-secret.py",
         "remote-restore-keyvault.py",
+        "validate-keyvault-network.py",
     ):
         shutil.copy2(SOURCE / name, scripts / name)
+
+    # Copy the real Azure network snapshot into the test environment.
+    snapshot_source = (
+        pathlib.Path.home()
+        / "learningsteps-recovery/keyvault-network-snapshot.json"
+    )
+
+    shutil.copy2(
+        snapshot_source,
+        scripts / "keyvault-network-snapshot.json",
+    )
 
     (scripts / "execute-keyvault-recovery.sh").chmod(0o700)
     (scripts / "run-keyvault-recovery-command.sh").chmod(0o700)
@@ -263,7 +281,6 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
         "LS_VM_COUNT": str(vm_count),
         "LS_VM_ID": vm_id,
         "LS_PRINCIPAL": principal,
-        "LS_TEST_PRIVATE_IP": "10.30.3.4",
     })
 
     controller = scripts / "execute-keyvault-recovery.sh"
@@ -303,6 +320,16 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
         }))
         state_path.chmod(0o600)
 
+        snapshot_path = scripts / "keyvault-network-snapshot.json"
+
+        snapshot_data = json.loads(snapshot_source.read_text())
+
+        if scenario == "network-fails":
+            snapshot_data["record"]["aRecords"][0]["ipv4Address"] = "10.30.3.99"
+
+        snapshot_path.write_text(json.dumps(snapshot_data))
+        snapshot_path.chmod(0o600)
+
         env["LS_TEST_SCENARIO"] = scenario
 
         result = subprocess.run(
@@ -312,6 +339,13 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
             text=True,
             timeout=25,
         )
+
+        if scenario == "network-fails":
+            assert not (payloads / "restore.sh").exists(), (
+                "SECURITY FAILURE: Restore payload generated "
+                "despite invalid network configuration"
+            )
+            print("PASS: Invalid network blocked restore payload generation")
 
         steps = log.read_text().splitlines()
         status = json.loads(state_path.read_text())["status"]
