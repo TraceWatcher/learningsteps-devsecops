@@ -288,6 +288,18 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
             "principal_id": principal,
             "role": "Key Vault Secrets Officer",
             "status": "prepared",
+            "vault_id": (
+                "/subscriptions/901cb597-1248-4bc6-8b92-0452114c48b9"
+                "/resourceGroups/rg-learningsteps-devsecops"
+                "/providers/Microsoft.KeyVault/vaults/kv-lsteps-305c3ba6"
+            ),
+            "assignment_id": (
+                "/subscriptions/901cb597-1248-4bc6-8b92-0452114c48b9"
+                "/resourceGroups/rg-learningsteps-devsecops"
+                "/providers/Microsoft.KeyVault/vaults/kv-lsteps-305c3ba6"
+                "/providers/Microsoft.Authorization/roleAssignments/"
+                + str(uuid.uuid4())
+            ),
         }))
         state_path.chmod(0o600)
 

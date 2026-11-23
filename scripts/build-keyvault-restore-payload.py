@@ -11,6 +11,16 @@ import stat
 import uuid
 
 VAULT = "kv-lsteps-305c3ba6"
+
+SUBSCRIPTION = "901cb597-1248-4bc6-8b92-0452114c48b9"
+RESOURCE_GROUP = "rg-learningsteps-devsecops"
+
+EXPECTED_VAULT_ID = (
+    f"/subscriptions/{SUBSCRIPTION}"
+    f"/resourceGroups/{RESOURCE_GROUP}"
+    f"/providers/Microsoft.KeyVault/vaults/{VAULT}"
+)
+
 REMOTE_SCRIPT = (
     "/opt/learningsteps-recovery/remote-restore-keyvault.py"
 )
@@ -37,6 +47,39 @@ def load_state(path):
 
     if state.get("role") != "Key Vault Secrets Officer":
         raise RuntimeError("Unexpected recovery role")
+
+    vault_id = state.get("vault_id")
+
+    if (
+        not isinstance(vault_id, str)
+        or vault_id.lower() != EXPECTED_VAULT_ID.lower()
+    ):
+        raise RuntimeError(
+            "Recovery state references an unexpected Key Vault"
+        )
+
+    assignment_id = state.get("assignment_id")
+
+    if not isinstance(assignment_id, str):
+        raise RuntimeError("Missing RBAC assignment ID")
+
+    expected_prefix = (
+        EXPECTED_VAULT_ID
+        + "/providers/Microsoft.Authorization/roleAssignments/"
+    )
+
+    if not assignment_id.lower().startswith(expected_prefix.lower()):
+        raise RuntimeError("RBAC assignment has unexpected scope")
+
+    assignment_name = assignment_id[len(expected_prefix):]
+
+    if (
+        "/" in assignment_name
+        or not assignment_name
+    ):
+        raise RuntimeError("Invalid RBAC assignment path")
+
+    uuid.UUID(assignment_name)
 
     return vm_id
 
