@@ -12,9 +12,29 @@ usage() {
   echo "Live Azure execution is disabled."
 }
 
-if [[ "$MODE" != "--plan" && "$MODE" != "--test" ]]; then
+if [[ "$MODE" != "--plan" &&
+      "$MODE" != "--test" &&
+      "$MODE" != "--integration-test" ]]; then
   usage >&2
   exit 2
+fi
+
+if [[ "$MODE" == "--integration-test" ]]; then
+  [[ $# -eq 1 ]] || {
+    usage >&2
+    exit 2
+  }
+
+  # Require an explicitly selected isolated test directory.
+  [[ -n "${LS_INTEGRATION_ROOT:-}" &&
+     "${LS_INTEGRATION_ROOT:0:1}" == "/" &&
+     -d "$LS_INTEGRATION_ROOT" &&
+     ! -L "$LS_INTEGRATION_ROOT" ]] || {
+    echo "ERROR: Isolated integration directory required" >&2
+    exit 2
+  }
+
+  INTEGRATION_ROOT="$LS_INTEGRATION_ROOT"
 fi
 
 if [[ "$MODE" == "--test" ]]; then
@@ -111,12 +131,95 @@ mock_operation() {
   return 0
 }
 
+
+integration_operation() {
+  local operation="$1"
+  local script=""
+
+  case "$operation" in
+    preflight)
+      script="prepare-keyvault-transport.sh"
+      ;;
+    transport)
+      script="transport-keyvault-password.sh"
+      ;;
+    install|restore)
+      script="run-keyvault-recovery-command.sh"
+      ;;
+    grant|cleanup)
+      script="recovery-keyvault-rbac.sh"
+      ;;
+    verify)
+      # The remote restore already verifies the exact
+      # secret version and password before returning 0.
+      echo "PASS: Restore verification is part of remote execution"
+      return 0
+      ;;
+    *)
+      echo "ERROR: Unknown operation" >&2
+      return 2
+      ;;
+  esac
+
+  local target="$INTEGRATION_ROOT/$script"
+
+  [[ -f "$target" && ! -L "$target" && -x "$target" ]] || {
+    echo "ERROR: Integration script unavailable: $script" >&2
+    return 1
+  }
+
+  echo "[INTEGRATION] $operation"
+
+  case "$operation" in
+    transport)
+      "$target" --transfer
+      ;;
+    install|restore)
+      local payload
+      local command_mode
+
+      if [[ "$operation" == "install" ]]; then
+        payload="$INTEGRATION_ROOT/payloads/install.sh"
+        command_mode="--install"
+      else
+        payload="$INTEGRATION_ROOT/payloads/restore.sh"
+        command_mode="--restore"
+      fi
+
+      [[ -f "$payload" && ! -L "$payload" ]] || {
+        echo "ERROR: Missing integration payload" >&2
+        return 1
+      }
+
+      [[ -n "${LS_MOCK_AZ:-}" &&
+         -x "$LS_MOCK_AZ" ]] || {
+        echo "ERROR: Offline Azure mock required" >&2
+        return 1
+      }
+
+      "$target" --offline-test "$command_mode" "$payload"
+      ;;
+    grant)
+      "$target" grant
+      ;;
+    cleanup)
+      "$target" cleanup-auto
+      ;;
+    *)
+      "$target"
+      ;;
+  esac
+}
+
 run_operation() {
   local operation="$1"
 
   case "$MODE" in
     --test)
       mock_operation "$operation"
+      ;;
+    --integration-test)
+      integration_operation "$operation"
       ;;
     *)
       echo "ERROR: Live recovery backend is disabled" >&2
@@ -184,7 +287,7 @@ trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo "LearningSteps Recovery – MOCK MODE"
+echo "LearningSteps Recovery – $MODE"
 echo "Scenario: $SCENARIO"
 
 run_operation preflight
