@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """Offline integration of the real recovery controller and adapter."""
 
@@ -221,6 +220,10 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
         "execute-keyvault-recovery.sh",
         "run-keyvault-recovery-command.sh",
         "verify-run-command-result.py",
+        "build-keyvault-install-payload.py",
+        "build-keyvault-restore-payload.py",
+        "restore-keyvault-secret.py",
+        "remote-restore-keyvault.py",
     ):
         shutil.copy2(SOURCE / name, scripts / name)
 
@@ -242,11 +245,6 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
     mock_az = root / "mock-az"
     executable(mock_az, AZ_STUB)
 
-    for name in ("install.sh", "restore.sh"):
-        payload = payloads / name
-        payload.write_text("#!/usr/bin/env bash\nexit 0\n")
-        payload.chmod(0o600)
-
     vm_id = str(uuid.uuid4())
     principal = str(uuid.uuid4())
     recovery_id = str(uuid.uuid4())
@@ -265,6 +263,7 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
         "LS_VM_COUNT": str(vm_count),
         "LS_VM_ID": vm_id,
         "LS_PRINCIPAL": principal,
+        "LS_TEST_PRIVATE_IP": "10.30.3.4",
     })
 
     controller = scripts / "execute-keyvault-recovery.sh"
@@ -279,10 +278,15 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
         log.write_text("")
         vm_count.write_text("")
 
+        # Remove generated payloads from the previous scenario.
+        for name in ("install.sh", "restore.sh"):
+            (payloads / name).unlink(missing_ok=True)
+
         state_path.write_text(json.dumps({
             "recovery_id": recovery_id,
             "vm_id": vm_id,
             "principal_id": principal,
+            "role": "Key Vault Secrets Officer",
             "status": "prepared",
         }))
         state_path.chmod(0o600)

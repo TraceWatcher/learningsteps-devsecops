@@ -174,22 +174,48 @@ integration_operation() {
     transport)
       "$target" --transfer
       ;;
+
     install|restore)
       local payload
       local command_mode
 
-      if [[ "$operation" == "install" ]]; then
-        payload="$INTEGRATION_ROOT/payloads/install.sh"
-        command_mode="--install"
-      else
-        payload="$INTEGRATION_ROOT/payloads/restore.sh"
-        command_mode="--restore"
-      fi
+      local payload_dir="$INTEGRATION_ROOT/payloads"
 
-      [[ -f "$payload" && ! -L "$payload" ]] || {
-        echo "ERROR: Missing integration payload" >&2
+      [[ -d "$payload_dir" &&
+         ! -L "$payload_dir" ]] || {
+        echo "ERROR: Integration payload directory missing" >&2
         return 1
       }
+
+      if [[ "$operation" == "install" ]]; then
+        payload="$payload_dir/install.sh"
+        command_mode="--install"
+
+        [[ ! -e "$payload" && ! -L "$payload" ]] || {
+          echo "ERROR: Installation payload already exists" >&2
+          return 1
+        }
+
+        python3 \
+          "$INTEGRATION_ROOT/build-keyvault-install-payload.py" \
+          --output "$payload"
+      else
+        payload="$payload_dir/restore.sh"
+        command_mode="--restore"
+
+        [[ ! -e "$payload" && ! -L "$payload" ]] || {
+          echo "ERROR: Restore payload already exists" >&2
+          return 1
+        }
+
+        python3 \
+          "$INTEGRATION_ROOT/build-keyvault-restore-payload.py" \
+          --state "$HOME/learningsteps-recovery/temporary-keyvault-rbac.json" \
+          --private-ip "${LS_TEST_PRIVATE_IP:?}" \
+          --output "$payload"
+      fi
+
+      bash -n "$payload"
 
       [[ -n "${LS_MOCK_AZ:-}" &&
          -x "$LS_MOCK_AZ" ]] || {
@@ -199,6 +225,7 @@ integration_operation() {
 
       "$target" --offline-test "$command_mode" "$payload"
       ;;
+
     grant)
       "$target" grant
       ;;
