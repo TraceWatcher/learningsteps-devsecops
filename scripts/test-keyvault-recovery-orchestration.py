@@ -220,6 +220,7 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
     home.mkdir()
     recovery.mkdir(mode=0o700)
     payloads.mkdir()
+    payloads.chmod(0o700)
 
     # Real controller, adapter and response validator.
     for name in (
@@ -231,6 +232,7 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
         "restore-keyvault-secret.py",
         "remote-restore-keyvault.py",
         "validate-keyvault-network.py",
+        "verify-keyvault-payload.py",
     ):
         shutil.copy2(SOURCE / name, scripts / name)
 
@@ -283,6 +285,80 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
         "LS_PRINCIPAL": principal,
     })
 
+
+    # Guard the existing Azure mock and inspect Run Command inputs.
+    original_mock_az = env["LS_MOCK_AZ"]
+    guard_log = root / "verified-payload-invocations.log"
+    guarded_mock_az = scripts / "verified-az-guard"
+
+    guarded_mock_az.write_text(r'''#!/usr/bin/env python3
+import os
+import pathlib
+import stat
+import sys
+
+args = sys.argv[1:]
+
+if args[:3] == ["vm", "run-command", "invoke"]:
+    try:
+        index = args.index("--scripts")
+        argument = args[index + 1]
+
+        if not argument.startswith("@"):
+            raise ValueError("Run Command does not reference a file")
+
+        payload = pathlib.Path(argument[1:])
+
+        if not payload.is_absolute():
+            raise ValueError("Payload path must be absolute")
+
+        info = payload.lstat()
+
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("Payload is not a regular file")
+
+        if stat.S_IMODE(info.st_mode) != 0o600:
+            raise ValueError("Unsafe payload permissions")
+
+        if payload.parent.name != "verified":
+            raise ValueError("Unverified payload passed to Azure")
+
+        if "payloads" in payload.parts:
+            raise ValueError("Original payload directory used")
+
+        if payload.name not in ("install.sh", "restore.sh"):
+            raise ValueError("Unexpected payload name")
+
+        expected_marker = (
+            "__LS_INSTALL_RC__"
+            if payload.name == "install.sh"
+            else "__LS_RESTORE_RC__"
+        )
+
+        content = payload.read_bytes()
+
+        if expected_marker.encode() not in content:
+            raise ValueError("Payload operation marker mismatch")
+
+        operation = payload.stem
+
+        with open(os.environ["LS_GUARD_LOG"], "a") as log:
+            log.write(operation + "\n")
+
+    except (ValueError, OSError, IndexError) as exc:
+        print(f"SECURITY: {exc}", file=sys.stderr)
+        sys.exit(73)
+
+real_mock = os.environ["LS_ORIGINAL_MOCK_AZ"]
+os.execv(real_mock, [real_mock, *args])
+''')
+    guarded_mock_az.chmod(0o700)
+
+    env["LS_ORIGINAL_MOCK_AZ"] = original_mock_az
+    env["LS_MOCK_AZ"] = str(guarded_mock_az)
+    env["LS_GUARD_LOG"] = str(guard_log)
+
+
     controller = scripts / "execute-keyvault-recovery.sh"
 
     for scenario, (
@@ -330,6 +406,8 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
         snapshot_path.write_text(json.dumps(snapshot_data))
         snapshot_path.chmod(0o600)
 
+        guard_log.write_text("")
+
         env["LS_TEST_SCENARIO"] = scenario
 
         result = subprocess.run(
@@ -339,6 +417,24 @@ with tempfile.TemporaryDirectory(prefix="ls-recovery-e2e-") as tmp:
             text=True,
             timeout=25,
         )
+
+
+        expected_azure_operations = {
+            "success": ["install", "restore"],
+            "transport-fails": [],
+            "grant-fails": ["install"],
+            "restore-fails": ["install", "restore"],
+            "cleanup-fails": ["install", "restore"],
+            "network-fails": ["install"],
+        }
+
+        actual_azure_operations = guard_log.read_text().splitlines()
+
+        assert actual_azure_operations == expected_azure_operations[scenario], (
+            f"{scenario}: unexpected Azure Run Command operations "
+            f"{actual_azure_operations!r}"
+        )
+
 
         if scenario == "network-fails":
             assert not (payloads / "restore.sh").exists(), (

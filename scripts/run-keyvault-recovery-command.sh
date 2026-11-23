@@ -129,17 +129,49 @@ if [[ "$MODE" == "--restore" ]]; then
   echo "PASS: Recovery RBAC state confirmed"
 fi
 
+
 TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
 
 RESULT_FILE="$TMP/result.json"
 
+# Live execution remains explicitly disabled.
 if [[ "$OFFLINE" -ne 1 ]]; then
   echo "PLAN: Live Azure Run Command remains disabled"
   exit 0
 fi
 
+# Create a protected destination for already verified bytes.
+VERIFIED_DIR="$TMP/verified"
+mkdir -m 700 -- "$VERIFIED_DIR"
+
+if [[ "$MODE" == "--install" ]]; then
+  OPERATION="install"
+else
+  OPERATION="restore"
+fi
+
+VERIFIED_PAYLOAD="$VERIFIED_DIR/$OPERATION.sh"
+
+echo "[SECURITY] Verifying and staging $OPERATION payload"
+
+if [[ "$OPERATION" == "install" ]]; then
+  python3 "$ROOT/scripts/verify-keyvault-payload.py" \
+    --mode install \
+    --payload "$PAYLOAD" \
+    --verified-output "$VERIFIED_PAYLOAD"
+else
+  python3 "$ROOT/scripts/verify-keyvault-payload.py" \
+    --mode restore \
+    --payload "$PAYLOAD" \
+    --state "$STATE" \
+    --snapshot "$ROOT/scripts/keyvault-network-snapshot.json" \
+    --verified-output "$VERIFIED_PAYLOAD"
+fi
+
+echo "PASS: Verified payload staged"
 echo "[OFFLINE] Simulating Azure Run Command"
+
 
 RUN_RC=0
 
@@ -147,7 +179,7 @@ if "${AZ_CMD[@]}" vm run-command invoke \
   --resource-group "$RG" \
   --name "$VM" \
   --command-id RunShellScript \
-  --scripts "@$PAYLOAD" \
+  --scripts "@$VERIFIED_PAYLOAD" \
   -o json > "$RESULT_FILE"; then
   echo "INFO: Azure CLI returned successfully"
 else
