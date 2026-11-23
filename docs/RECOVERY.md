@@ -1,8 +1,8 @@
 # LearningSteps – Infrastructure Recovery Runbook
 
 **Projekt:** LearningSteps DevSecOps on Azure
-**Stand:** 21.11.2026
-**Status:** Prepared – Full infrastructure recovery not yet executed
+**Stand:** 23.11.2026
+**Status:** PASS – Functional infrastructure and application recovery completed
 **Ziel:** Vollständige Wiederherstellung der LearningSteps-Infrastruktur und Anwendung nach einem kontrollierten Terraform-Destroy.
 
 ## 1. Recovery-Ziel und Umfang
@@ -47,7 +47,7 @@ Das Terraform-Remote-Backend befindet sich außerhalb der Workload-Resource-Grou
 | Vier Datensätze wiederhergestellt | PASS |
 | Ownership-Constraint getestet | PASS |
 | Verschlüsselte Secret-Sicherung per SHA-256 verglichen | PASS |
-| Vollständiger Azure-Destroy-/Apply-Test | NOT EXECUTED |
+| Vollständiger Azure-Destroy-/Apply-Test | PASS – 23.11.2026 |
 
 Die Datenbank enthält zum Zeitpunkt der Sicherung vier Einträge, davon einen mit und drei ohne `owner_id`. Die drei historischen Einträge ohne Besitzer bleiben aufgrund der `NOT VALID`-Migration erhalten.
 
@@ -246,7 +246,7 @@ Den tatsächlich bereitgestellten Registry-Namen und Login-Server überprüfen.
 API- und Web-Images müssen erneut bereitgestellt werden:
 
 - API: `learningsteps-api:v0.7.0`
-- Web: `learningsteps-web:v0.6.0`
+- Web: `learningsteps-web:v0.6.0-recovery-fix2`
 
 Die API wird aus der passenden Release-Version mit `APP_VERSION=v0.7.0` gebaut.
 
@@ -355,6 +355,209 @@ Für die Abgabe sollten folgende Screenshots und Protokolle vorliegen:
 
 Der Infrastructure-Recovery-Test gilt erst als **PASS**, wenn die Terraform-Infrastruktur erfolgreich neu bereitgestellt wurde und die Anwendung nach Wiederherstellung aller Abhängigkeiten erneut funktioniert.
 
-**Aktueller Status: NOT EXECUTED.**
+**Aktueller Status: PASS – Wiederherstellung am 23.11.2026 erfolgreich durchgeführt.**
 
 Das getestete PostgreSQL-Backup und die geprüfte verschlüsselte Secret-Sicherung dienen als Ausgangspunkt für den kontrollierten Wiederaufbau.
+
+## 11. Ergebnis des vollständigen Recovery-Tests
+
+**Testdatum:** 23.11.2026
+
+**Gesamtergebnis:** PASS – Funktionale Wiederherstellung nach
+kontrolliertem Infrastrukturverlust nachgewiesen.
+
+### 11.1 Infrastruktur
+
+- Terraform Destroy: 43 Ressourcen entfernt.
+- Die separate Terraform-Backend-Resource-Group blieb erhalten.
+- Terraform Apply: 44 Ressourcen neu erstellt.
+- Neuer AKS-Cluster und PostgreSQL-Server anhand ihrer
+  Identität beziehungsweise Erstellungsdaten bestätigt.
+- Neue Azure Managed Identities wurden bereitgestellt.
+- App Routing musste nach Terraform Apply separat aktiviert werden.
+
+### 11.2 PostgreSQL und Key Vault
+
+Das verschlüsselte PostgreSQL-Backup
+`learningsteps-20261121-180103.dump.age`
+wurde auf dem neuen PostgreSQL-16-Server eingespielt.
+
+Ergebnis:
+
+- Datenbank `learning_journal` erfolgreich wiederhergestellt.
+- Vier Einträge aus dem Backup vorhanden.
+- Zwei Constraints, ein Primary Key und drei weitere
+  Indizes durch das Recovery-Prüfskript bestätigt.
+- Unabhängiger Durchlauf von `--verify` erfolgreich.
+- Temporäre Recovery-Pods wurden entfernt.
+- Zugriff auf das PostgreSQL-Secret über Azure
+  Workload Identity und Key Vault CSI funktionierte.
+
+Verwendete Befehle:
+
+```bash
+./scripts/recover-postgres.sh --check-target
+./scripts/recover-postgres.sh --restore
+./scripts/recover-postgres.sh --verify
+```
+
+**Warnung:** `--restore` nicht unkontrolliert wiederholen.
+Bei einem teilweise abgeschlossenen Restore zuerst
+den Datenbankzustand untersuchen.
+
+### 11.3 AKS Routing und Kubernetes
+
+Das neue AKS benötigte nach dem Terraform-Rebuild
+die erneute Aktivierung von App Routing, Istio und
+Managed Gateway API.
+
+Verwendete Aktivierungsbefehle:
+
+```bash
+az aks approuting enable \
+  -g rg-learningsteps-devsecops \
+  -n aks-learningsteps \
+  --enable-default-domain \
+  --nginx None
+
+az aks update \
+  -g rg-learningsteps-devsecops \
+  -n aks-learningsteps \
+  --enable-app-routing-istio \
+  --enable-gateway-api
+```
+
+Vor dem nächsten Recovery-Lauf die unterstützten
+CLI-Optionen und Azure-Feature-Registrierungen prüfen.
+
+Read-only-Prüfung:
+
+```bash
+./scripts/check-aks-routing.sh
+```
+
+Diese Prüfung kontrolliert Subscription, AKS-Endpunkt,
+App Routing, Standarddomain, GatewayClass und
+Subscription-Feature.
+
+Der Kubernetes-Bootstrap wurde erfolgreich ausgeführt.
+Die Anwendung wurde anschließend wiederhergestellt.
+
+Für eine erneute Recovery ist die Reihenfolge wichtig:
+
+1. Terraform-Neuaufbau und AKS-Routing
+2. Kubernetes-Bootstrap mit ServiceAccount und CSI
+3. PostgreSQL-Restore und separate Verifikation
+4. Container-Images bereitstellen
+5. API-, Web- und Gateway-Deployment
+6. Entra-ID-Redirect-URI prüfen
+7. HTTPS, Anmeldung und Datenabruf validieren
+
+### 11.4 Container und ACR
+
+Die API wurde als `learningsteps-api:v0.7.0`
+wiederhergestellt.
+
+Für das Web wurde das finale Recovery-Image
+`learningsteps-web:v0.6.0-recovery-fix2` erstellt.
+
+Beide Image-Builds bestanden die verpflichtenden
+Trivy-Prüfungen auf HIGH/CRITICAL-Schwachstellen.
+
+Beim ursprünglichen Web-Rollout trat ein
+`CrashLoopBackOff` auf:
+
+```text
+nginx: open() "/etc/nginx/conf.d/default.conf"
+failed (13: Permission denied)
+```
+
+Ursache: Nginx lief mit UID 101, die Konfigurationsdatei
+besaß aber die Rechte `600` und gehörte root.
+
+Die Leseberechtigung wurde im Recovery-Build korrigiert.
+Anschließend waren `nginx -t` und der Kubernetes-Rollout
+erfolgreich.
+
+Der korrigierte Build-Prozess ist in
+`scripts/recover-images.sh` enthalten.
+
+### 11.5 HTTPS und Microsoft Entra ID
+
+Neue öffentliche Domain:
+
+`learningsteps.6b042d6926882100015ba12e.westeurope.aksapp.io`
+
+Bestätigte Ergebnisse:
+
+- Gateway `Accepted=True` und `Programmed=True`
+- HTTPRoute `Accepted=True` und `ResolvedRefs=True`
+- Öffentliche DNS-Auflösung erfolgreich
+- TLS-Zertifikat validiert
+- Weboberfläche: HTTP 200
+- API unter `/api/docs`: HTTP 200
+
+Nach dem Wiederaufbau schlug die Microsoft-Anmeldung
+zunächst mit `AADSTS50011` fehl.
+
+Ursache: Die neue AKS-Domain war nicht als SPA-Redirect-URI
+in der Entra-App-Registrierung hinterlegt.
+
+Nach Ergänzung der Redirect-URI funktionierte die Anmeldung.
+Eine ursprüngliche Lernnotiz war im Frontend sichtbar.
+
+Die Konfiguration lässt sich ohne Änderungen prüfen:
+
+```bash
+./scripts/check-entra-redirect.sh
+```
+
+### 11.6 Nicht vollständig automatisierte Schritte
+
+Die Recovery war erfolgreich, erforderte jedoch
+manuelle Eingriffe.
+
+Offene Verbesserungen:
+
+- App Routing und Gateway API deklarativ verwalten
+  oder ihre Aktivierung in einem abgesicherten
+  Recovery-Schritt automatisieren.
+- Eine stabile eigene Domain verwenden, damit
+  Entra-Redirect-URIs bei einem AKS-Rebuild
+  nicht wechseln.
+- ACR-Recovery-Push wiederanlauffähig machen:
+  vorhandene Images mit erwartetem Digest akzeptieren,
+  abweichende Digests ausdrücklich verweigern.
+- Alle Recovery-Schritte in einem orchestrierten
+  Ablauf mit klaren Abhängigkeiten zusammenführen.
+
+Das bestehende `recover-images.sh --push` verweigert
+vorhandene Tags absichtlich. Dieser Schutz darf
+nicht durch unkontrolliertes Überschreiben entfernt werden.
+
+### 11.7 Testabdeckung und Einschränkungen
+
+**Nachgewiesen:**
+
+- Vollständiger Terraform-Destroy und Rebuild
+- Verschlüsselter PostgreSQL-Restore
+- Separate Verifikation von vier Datensätzen
+- Key-Vault-CSI-Zugriff auf das DB-Secret
+- Image-Rebuild, Trivy und ACR-Push
+- Erfolgreiche AKS-Rollouts
+- Gateway, DNS, HTTPS und API-Erreichbarkeit
+- Entra-Anmeldung und Abruf einer historischen Lernnotiz
+
+**Nicht abschließend nachgewiesen:**
+
+- Vollständiger CRUD-Test nach dem Rebuild
+- Sämtliche Ownership-/Autorisierungsfälle
+- Funktion der KI-Zusammenfassung nach dem Rebuild
+- Vollständige Azure-Monitor-Telemetrie
+- Unbeaufsichtigte End-to-End-Recovery
+- Wiederanlauf aus einem teilweise abgeschlossenen
+  ACR-Recovery-Push
+
+Das Ergebnis ist daher als **erfolgreiche,
+teilautomatisierte Disaster Recovery** zu bewerten,
+nicht als vollständig automatisierte Wiederherstellung.

@@ -10,7 +10,7 @@ API_REF="v0.7.0"
 WEB_REF="a756d3c"
 
 API_TAG="v0.7.0"
-WEB_TAG="v0.6.0-recovery"
+WEB_TAG="v0.6.0-recovery-fix2"
 
 MODE="${1:---dry-run}"
 
@@ -379,7 +379,17 @@ USER 101"""
 if content.count(old) != 1:
     raise SystemExit("ERROR: Unexpected Web runtime base image")
 
-path.write_text(content.replace(old, new))
+content = content.replace(old, new)
+
+# Nginx must be able to read its configuration under UID 101.
+# Keep the final runtime user non-root.
+content += """
+USER root
+RUN chmod 644 /etc/nginx/conf.d/default.conf
+USER 101
+"""
+
+path.write_text(content)
 
 print("PASS: Web runtime security patch applied")
 PY

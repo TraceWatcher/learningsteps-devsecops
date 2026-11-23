@@ -242,7 +242,7 @@ replace_pattern(
     r'^([ \t]*image:[ \t]*)\S+/learningsteps-web:\S+',
     lambda m: (
         f"{m.group(1)}"
-        f"{registry}/learningsteps-web:v0.6.0-recovery"
+        f"{registry}/learningsteps-web:v0.6.0-recovery-fix2"
     )
 )
 
@@ -400,7 +400,7 @@ PY
 
   for image in \
     "learningsteps-api:v0.7.0" \
-    "learningsteps-web:v0.6.0-recovery"; do
+    "learningsteps-web:v0.6.0-recovery-fix2"; do
 
     digest="$(az acr repository show \
       --name "$ACR_NAME" \
