@@ -464,7 +464,7 @@ Die Ergebnisse gelten jeweils für die geprüften Commits und ersetzen keine Lau
 
 **Ziel:** Nachweis, dass eine Codeänderung über die GitHub-Actions-Release-Pipeline automatisch bis zur öffentlich erreichbaren AKS-Anwendung bereitgestellt wird.
 
-**Ausgangszustand:**
+**Ausgangszustand des historischen Release-Tests `v0.7.0`:**
 
 - API-Image `v0.6.0` auf AKS
 - Automatisches AKS-Deployment über die GitHub-Environment-Variable `ENABLE_AKS_AUTO_DEPLOY=true` aktiviert
@@ -513,7 +513,12 @@ https://github.com/TraceWatcher/learningsteps-devsecops/actions/runs/44816714185
 
 **Status:** PASS
 
-**Einschränkung:** Der Release-Workflow wird durch einen Git-Tag-Push ausgelöst. Es wurde kein automatisches Deployment bei jedem gewöhnlichen Push auf `main` nachgewiesen. Der Nachweis bezieht sich auf einen vollständig automatisierten, tagbasierten Release.
+**Gültigkeitsbereich:** Der Lauf belegt den tagbasierten API-Release mit
+damals aktiviertem AKS-Deployment. Der aktuelle Release-Workflow
+veröffentlicht das geprüfte API-Image in ACR. Das AKS-Deployment erfolgt
+bei `ENABLE_AKS_AUTO_DEPLOY=true`. Bei der Prüfung am 24.11.2026 war der
+Schalter im GitHub-Environment `production` deaktiviert.
+[Aktueller Release-Ablauf](OPERATIONS.md#api-release)
 
 ### CI-06 – Security Enforcement durch negativen Terraform-Test
 
@@ -708,7 +713,7 @@ Ein vollständiger Netzwerkerreichbarkeitstest aus jedem möglichen Quellnetz wu
 | OT-02 | Gezielte JWT-Negativtests | Hoch |
 | OT-03 | Prompt-Injection-Tests | Mittel |
 | OT-04 | Wiederherstellung einer Terraform-State-Version | Hoch |
-| OT-05 | PostgreSQL-Restore-Test | Hoch |
+| OT-05 | Vollständiger Anwendungsregressionstest nach PostgreSQL-Restore, einschließlich CRUD, Ownership und KI | Hoch |
 | OT-06 | Automatische Alarm-Auslösung und Benachrichtigung | Mittel |
 | OT-07 | Externer automatisierter HTTPS-Verfügbarkeitstest | Mittel |
 | OT-08 | Vollständige Egress-Policy-Tests | Mittel |
@@ -729,7 +734,13 @@ Zusätzlich wurden mehrere sicherheitsrelevante Kontrollen praktisch getestet, d
 
 Auch die Monitoring-Datenerfassung und der Zugriff auf den gehärteten Terraform-State wurden erfolgreich validiert.
 
-**Nicht nachgewiesen** sind bislang eine vollständige Cross-User-Isolation, umfassende adversariale Tests, zuverlässige automatische Alarmierung und vollständige Wiederherstellungsprozesse.
+**Offen** sind die Cross-User-Prüfung mit zwei echten Entra-Konten,
+umfassende adversariale Tests und automatische Alarmierung. Der
+kontrollierte Terraform-Rebuild und der PostgreSQL-Restore wurden am
+23.11.2026 nachgewiesen. Der Test war teilautomatisiert. Der vollständige
+Anwendungsregressionstest nach dem Rebuild und die Wiederherstellung
+einer früheren Terraform-State-Version bleiben offen.
+[Recovery-Testabdeckung](RECOVERY.md#117-testabdeckung-und-einschränkungen)
 
 ### Nachweis der Projekt-Erfolgskriterien
 
@@ -737,12 +748,12 @@ Auch die Monitoring-Datenerfassung und der Zugriff auf den gehärteten Terraform
 |---|---|---|
 | Continuous Deployment | PASS – tagbasierter Release | Automatischer AKS-Release `v0.7.0`, GitHub Actions #44816714185 |
 | Security Enforcement | PASS – Terraform-CI-Gate | Zwei CRITICAL-Befunde blockierten CI, GitHub Actions #44916955842 |
-| Infrastructure Recovery | OPEN | Kontrollierter Terraform-Destroy-/Apply-Test noch nicht durchgeführt |
+| Infrastructure Recovery | PASS – kontrollierter, teilautomatisierter Rebuild | Terraform-Destroy und -Rebuild, PostgreSQL-Restore und funktionaler Wiederanlauf am 23.11.2026. [Recovery-Ergebnis](RECOVERY.md#11-ergebnis-des-vollständigen-recovery-tests) |
 | Grafana Dashboard | OPTIONAL / NOT IMPLEMENTED | Azure Monitor und Log Analytics stattdessen verwendet |
 
-Die beiden ersten Erfolgskriterien wurden durch tatsächliche GitHub-Actions-Ausführungen nachgewiesen.
-
-Der Infrastruktur-Wiederherstellungstest wird ausdrücklich erst nach Abschluss aller anderen Projektnachweise durchgeführt.
+Die Release- und CI-Nachweise stammen aus den jeweiligen GitHub-Actions-Läufen.
+Der Recovery-Nachweis stammt aus der anschließend durchgeführten
+kontrollierten Wiederherstellung in Azure.
 
 Das optionale Grafana-Dashboard wurde nicht umgesetzt. Die Erfassung realer Kubernetes-Telemetriedaten über Azure Monitor und Log Analytics wurde unabhängig davon bestätigt.
 
