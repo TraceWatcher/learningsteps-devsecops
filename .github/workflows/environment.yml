@@ -24,31 +24,69 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Verify operations environment
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      environment-id: ${{ steps.protection.outputs.environment-id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Verify environment ID, branch and reviewer settings
+        id: protection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_ENVIRONMENT_ID: ${{ vars.OPERATIONS_ENVIRONMENT_ID }}
+        shell: bash
+        run: |
+          if [[ ! "$EXPECTED_ENVIRONMENT_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Environment Control ist nicht aktiviert. OPERATIONS_ENVIRONMENT_ID fehlt oder ist ungültig."
+            exit 1
+          fi
+          id=$(bash scripts/check-operations-environment.sh "$GITHUB_REPOSITORY" "$EXPECTED_ENVIRONMENT_ID")
+          printf 'environment-id=%s\n' "$id" >> "$GITHUB_OUTPUT"
+
   environment:
+    needs: preflight
     name: Environment ${{ inputs.action }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    environment: production
+    environment: production-operations
 
     permissions:
+      actions: read
       contents: read
       id-token: write
 
     env:
       RG: rg-learningsteps-devsecops
       AKS: aks-learningsteps
-      POSTGRES: psql-learningsteps-305c3ba6
+      POSTGRES: ${{ vars.POSTGRES_SERVER_NAME }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       VM: learningsteps-maintenance
       ACTION: ${{ inputs.action }}
       CONFIRM_STOP: ${{ inputs.confirm_stop }}
 
     steps:
-      - name: Azure Login via OIDC
-        uses: azure/login@v3
+      - uses: actions/checkout@v7
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          persist-credentials: false
+
+      - name: Recheck environment ID, branch and reviewer settings before Azure login
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_ENVIRONMENT_ID: ${{ needs.preflight.outputs.environment-id }}
+        shell: bash
+        run: |
+          test -n "$EXPECTED_ENVIRONMENT_ID"
+          bash scripts/check-operations-environment.sh "$GITHUB_REPOSITORY" "$EXPECTED_ENVIRONMENT_ID" >/dev/null
 
       - name: Verify stop confirmation
         if: inputs.action == 'stop'
@@ -59,133 +97,16 @@ jobs:
             exit 1
           fi
 
+      - name: Azure Login via OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       - name: Manage Azure environment
         shell: bash
-        run: |
-          set -euo pipefail
-
-          aks_state() {
-            az aks show -g "$RG" -n "$AKS" \
-              --query powerState.code -o tsv
-          }
-
-          pg_state() {
-            az postgres flexible-server show \
-              -g "$RG" -n "$POSTGRES" \
-              --query state -o tsv
-          }
-
-          vm_state() {
-            az vm get-instance-view \
-              --resource-group "$RG" \
-              --name "$VM" \
-              --query "instanceView.statuses[?starts_with(code, 'PowerState/')].code | [0]" \
-              -o tsv
-          }
-
-          show_status() {
-            local aks pg vm
-
-            aks=$(aks_state) || return 1
-            pg=$(pg_state) || return 1
-            vm=$(vm_state) || return 1
-
-            [[ -n "$aks" && -n "$pg" && -n "$vm" ]] || {
-              echo "::error::Mindestens ein Ressourcenstatus ist leer"
-              return 1
-            }
-
-            echo "=== LearningSteps Environment ==="
-            echo "AKS:        $aks"
-            echo "PostgreSQL: $pg"
-            echo "VM:         $vm"
-          }
-
-          case "$ACTION" in
-            status)
-              show_status
-              ;;
-
-            start)
-              echo "=== Starting PostgreSQL ==="
-              PG=$(pg_state)
-
-              if [[ "$PG" == "Stopped" ]]; then
-                az postgres flexible-server start \
-                  -g "$RG" -n "$POSTGRES" -o none
-              elif [[ "$PG" != "Ready" ]]; then
-                echo "::error::PostgreSQL in unerwartetem Zustand: $PG"
-                exit 1
-              fi
-
-              [[ "$(pg_state)" == "Ready" ]] || {
-                echo "::error::PostgreSQL ist nicht bereit"
-                exit 1
-              }
-
-              echo "=== Starting AKS ==="
-              AKS_STATE=$(aks_state)
-
-              if [[ "$AKS_STATE" == "Stopped" ]]; then
-                az aks start -g "$RG" -n "$AKS" -o none
-              elif [[ "$AKS_STATE" != "Running" ]]; then
-                echo "::error::AKS in unerwartetem Zustand: $AKS_STATE"
-                exit 1
-              fi
-
-              [[ "$(aks_state)" == "Running" ]] || {
-                echo "::error::AKS läuft nicht"
-                exit 1
-              }
-
-              echo "=== Environment started ==="
-              show_status
-              ;;
-
-            stop)
-              echo "=== Stopping AKS ==="
-              AKS_STATE=$(aks_state)
-
-              if [[ "$AKS_STATE" == "Running" ]]; then
-                az aks stop -g "$RG" -n "$AKS" -o none
-              elif [[ "$AKS_STATE" != "Stopped" ]]; then
-                echo "::error::AKS in unerwartetem Zustand: $AKS_STATE"
-                exit 1
-              fi
-
-              [[ "$(aks_state)" == "Stopped" ]] || {
-                echo "::error::AKS ist nicht gestoppt"
-                exit 1
-              }
-
-              echo "=== Stopping PostgreSQL ==="
-              PG=$(pg_state)
-
-              if [[ "$PG" == "Ready" ]]; then
-                az postgres flexible-server stop \
-                  -g "$RG" -n "$POSTGRES" -o none
-              elif [[ "$PG" != "Stopped" ]]; then
-                echo "::error::PostgreSQL in unerwartetem Zustand: $PG"
-                exit 1
-              fi
-
-              echo "=== Deallocating maintenance VM ==="
-              VM_STATE=$(vm_state)
-
-              if [[ "$VM_STATE" != "PowerState/deallocated" ]]; then
-                az vm deallocate \
-                  -g "$RG" -n "$VM" -o none
-              fi
-
-              echo "=== Environment stopped ==="
-              show_status
-              ;;
-
-            *)
-              echo "::error::Unbekannte Aktion: $ACTION"
-              exit 1
-              ;;
-          esac
+        run: bash scripts/control-environment.sh
 
       - name: Verify application after start
         if: inputs.action == 'start'

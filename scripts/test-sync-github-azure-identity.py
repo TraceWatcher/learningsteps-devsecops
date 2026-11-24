@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import quote
 
 SCRIPT = Path(__file__).with_name("sync-github-azure-identity.sh")
 SUB = "11111111-1111-4111-8111-111111111111"
@@ -37,6 +38,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 root = Path(os.environ["SYNC_TEST_ROOT"])
 command = [Path(sys.argv[0]).name, *sys.argv[1:]]
@@ -141,6 +143,8 @@ class IdentitySyncTest(unittest.TestCase):
             stub.chmod(0o700)
 
         self.responses = {}
+        self.set_cmd = SET_CMD
+        self.get_cmd = GET_CMD
         self.respond(ACCOUNT_CMD, {"id": SUB, "tenantId": TENANT})
         self.respond(
             IDENTITY_CMD,
@@ -229,10 +233,10 @@ class IdentitySyncTest(unittest.TestCase):
         self.assertIn(message, output)
         self.assertNotIn(SECRET_MARKER, output)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-        self.assertEqual(calls.count(SET_CMD), int(writes))
-        self.assertEqual(calls.count(GET_CMD), int(readback))
+        self.assertEqual(calls.count(self.set_cmd), int(writes))
+        self.assertEqual(calls.count(self.get_cmd), int(readback))
         if readback:
-            self.assertEqual(calls[-2:], [SET_CMD, GET_CMD])
+            self.assertEqual(calls[-2:], [self.set_cmd, self.get_cmd])
         return output
 
     def test_up_to_date_and_case_insensitive(self):
@@ -386,6 +390,251 @@ class IdentitySyncTest(unittest.TestCase):
         self.assert_sync(2, "GitHub-Rückleseantwort", writes=True, readback=True)
         self.respond(GET_CMD, status=4)
         self.assert_sync(2, "Rücklesen", writes=True, readback=True)
+
+    def setup_operations(self):
+        environment = "production-operations"
+        identity = "id-learningsteps-github-operations"
+        postgres = "psql-learningsteps-operations"
+        role = "LearningSteps Environment Operator"
+        path = f"{REPO_PATH}/environments/{environment}"
+        self.ops_environment_cmd = github(path)
+        self.ops_branch_cmd = github(f"{path}/deployment-branch-policies?per_page=100")
+        self.ops_list_cmd = github(f"{path}/variables?per_page=100", "--paginate")
+        role_filter = quote(f"roleName eq '{role}'", safe="")
+        role_url = (
+            f"https://management.azure.com{RG_ID}/providers/Microsoft.Authorization/roleDefinitions"
+            f"?api-version=2022-04-01&$filter={role_filter}"
+        )
+        self.ops_role_cmd = [*az("rest", "--method", "get", "--url", role_url), "-o", "json"]
+        assignment_args = [
+            *az("role", "assignment", "list"),
+            "--assignee-object-id",
+            PRINCIPAL,
+            "--include-groups",
+            "--fill-principal-name",
+            "false",
+            "--fill-role-definition-name",
+            "false",
+            "-o",
+            "json",
+        ]
+        self.ops_assignments_cmd = [*assignment_args, "--all"]
+        self.ops_ancestors_cmd = [
+            *assignment_args,
+            "--scope",
+            f"/subscriptions/{SUB}",
+            "--include-inherited",
+        ]
+        self.ops_fic_cmd = [identity if arg == IDENTITY else arg for arg in FIC_CMD]
+        self.set_cmd = [environment if arg == "production" else arg for arg in SET_CMD]
+        self.get_cmd = github(f"{path}/variables/AZURE_CLIENT_ID")
+
+        # Remove release-specific responses so that a call to a release resource fails the test.
+        for command in (
+            IDENTITY_CMD,
+            FIC_CMD,
+            LIST_CMD,
+            ROLE_CMD,
+            show("acr", ACR),
+            show("aks", AKS),
+            assignments(ACR_ID),
+            assignments(AKS_ID),
+        ):
+            self.responses.pop(json.dumps(command))
+        self.respond(
+            show("identity", identity),
+            {
+                "id": f"{RG_ID}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{identity}",
+                "clientId": CURRENT,
+                "tenantId": TENANT,
+                "principalId": PRINCIPAL,
+            },
+        )
+        self.ops_environment = {
+            "name": environment,
+            "id": 42,
+            "deployment_branch_policy": {
+                "protected_branches": False,
+                "custom_branch_policies": True,
+            },
+            "protection_rules": [
+                {
+                    "type": "required_reviewers",
+                    "prevent_self_review": True,
+                    "reviewers": [{"type": "User", "reviewer": {"id": 72}}],
+                },
+            ],
+        }
+        self.respond(self.ops_environment_cmd, self.ops_environment)
+        self.respond(
+            self.ops_branch_cmd,
+            {"total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}]},
+        )
+        self.ops_vars = [
+            {"name": "AZURE_CLIENT_ID", "value": CURRENT},
+            {"name": "AZURE_TENANT_ID", "value": TENANT},
+            {"name": "AZURE_SUBSCRIPTION_ID", "value": SUB},
+            {"name": "POSTGRES_SERVER_NAME", "value": postgres},
+        ]
+        self.respond(self.ops_list_cmd, {"total_count": 4, "variables": self.ops_vars})
+
+        self.ops_fic = {
+            **self.fic,
+            "name": f"fic-learningsteps-github-{environment}",
+            "subject": f"{self.fic['subject']}-operations",
+        }
+        self.respond(self.ops_fic_cmd, [self.ops_fic])
+        self.ops_role = {
+            "roleName": role,
+            "type": "CustomRole",
+            "assignableScopes": [RG_ID],
+            "permissions": [
+                {
+                    "actions": [
+                        f"{CLUSTER}/read",
+                        f"{CLUSTER}/start/action",
+                        f"{CLUSTER}/stop/action",
+                        "Microsoft.DBforPostgreSQL/flexibleServers/read",
+                        "Microsoft.DBforPostgreSQL/flexibleServers/start/action",
+                        "Microsoft.DBforPostgreSQL/flexibleServers/stop/action",
+                        "Microsoft.Compute/virtualMachines/instanceView/read",
+                        "Microsoft.Compute/virtualMachines/deallocate/action",
+                    ],
+                    "notActions": [],
+                    "dataActions": [],
+                    "notDataActions": [],
+                }
+            ],
+        }
+        self.ops_assignments = [
+            assignment(scope, CUSTOM_ROLE)
+            for scope in (
+                AKS_ID,
+                f"{RG_ID}/providers/Microsoft.DBforPostgreSQL/flexibleServers/{postgres}",
+                f"{RG_ID}/providers/Microsoft.Compute/virtualMachines/learningsteps-maintenance",
+            )
+        ]
+        self.ops_role_id = self.ops_assignments[0]["roleDefinitionId"]
+        self.respond_operations_role()
+        self.respond(self.ops_assignments_cmd, self.ops_assignments)
+        self.respond(self.ops_ancestors_cmd, [])
+
+    def respond_operations_role(self):
+        self.respond(
+            self.ops_role_cmd,
+            {"value": [{"id": self.ops_role_id, "name": CUSTOM_ROLE, "properties": self.ops_role}]},
+        )
+
+    def test_operations_check_and_update_only_operations_variables(self):
+        self.setup_operations()
+        self.assert_sync(0, "bereits aktuell", args=("--check", "--operations"))
+        self.ops_vars[0]["value"] = FORMER
+        self.respond(self.ops_list_cmd, {"total_count": 4, "variables": self.ops_vars})
+        self.assert_sync(1, "aktualisiert werden", args=("--operations", "--check"))
+        self.respond(self.set_cmd, raw="")
+        self.respond(self.get_cmd, {"name": "AZURE_CLIENT_ID", "value": CURRENT})
+        self.assert_sync(
+            0, "aktualisiert und verifiziert", args=("--operations",), writes=True, readback=True
+        )
+
+    def test_operations_rejects_missing_environment_or_protection(self):
+        self.setup_operations()
+        self.respond(self.ops_environment_cmd, status=1)
+        self.assert_sync(2, "manuell angelegt", args=("--operations",))
+        self.ops_environment["protection_rules"][0]["prevent_self_review"] = False
+        self.respond(self.ops_environment_cmd, self.ops_environment)
+        self.assert_sync(1, "Reviewer-Regel", args=("--operations",))
+        self.ops_environment["protection_rules"][0]["prevent_self_review"] = True
+        self.respond(self.ops_environment_cmd, self.ops_environment)
+        for policies in ([{"name": "main", "type": "tag"}], [{"name": "*", "type": "branch"}]):
+            self.respond(self.ops_branch_cmd, {"total_count": 1, "branch_policies": policies})
+            self.assert_sync(1, "genau eine Branch-Regel für main", args=("--operations",))
+
+    def test_operations_fails_closed_when_reviewer_settings_are_incomplete(self):
+        self.setup_operations()
+        reviewer_rule = self.ops_environment["protection_rules"][0]
+        for overrides in (
+            {"prevent_self_review": None},
+            {"reviewers": []},
+            {"reviewers": [{"type": "Team"}]},
+        ):
+            with self.subTest(overrides=overrides):
+                self.ops_environment["protection_rules"] = [{**reviewer_rule, **overrides}]
+                self.respond(self.ops_environment_cmd, self.ops_environment)
+                self.assert_sync(1, "Reviewer-Regel", args=("--operations",))
+
+    def test_operations_rejects_wrong_or_additional_federation(self):
+        self.setup_operations()
+        for fics in ([{**self.ops_fic, "subject": self.fic["subject"]}], [self.ops_fic, self.fic]):
+            self.respond(self.ops_fic_cmd, fics)
+            self.assert_sync(
+                1, "Federated Credential für production-operations", args=("--operations",)
+            )
+
+    def test_operations_validates_target_tenant_and_subscription(self):
+        self.setup_operations()
+        for index in (1, 2):
+            with self.subTest(variable=self.ops_vars[index]["name"]):
+                original = self.ops_vars[index]["value"]
+                self.ops_vars[index]["value"] = FORMER
+                self.respond(self.ops_list_cmd, {"total_count": 4, "variables": self.ops_vars})
+                self.assert_sync(1, self.ops_vars[index]["name"], args=("--operations",))
+                self.ops_vars[index]["value"] = original
+
+    def test_operations_rejects_role_expansion(self):
+        self.setup_operations()
+        self.ops_role["permissions"][0]["actions"].append("Microsoft.Compute/virtualMachines/*")
+        self.respond_operations_role()
+        self.assert_sync(1, "Aktionen oder AssignableScopes", args=("--operations",))
+        self.ops_role["permissions"][0]["actions"].pop()
+        self.ops_role["assignableScopes"].append(f"/subscriptions/{SUB}")
+        self.respond_operations_role()
+        self.assert_sync(1, "Aktionen oder AssignableScopes", args=("--operations",))
+
+    def test_operations_requires_only_the_three_direct_assignments(self):
+        self.setup_operations()
+        for assignments_ in (
+            self.ops_assignments[:2],
+            [*self.ops_assignments, assignment(RG_ID, CUSTOM_ROLE)],
+            [*self.ops_assignments, assignment(ACR_ID, ACR_PUSH)],
+            [*self.ops_assignments[:2], {**self.ops_assignments[2], "principalId": FORMER}],
+        ):
+            with self.subTest(assignments=assignments_):
+                self.respond(self.ops_assignments_cmd, assignments_)
+                self.assert_sync(1, "exakt drei direkte", args=("--operations", "--check"))
+        self.respond(self.ops_assignments_cmd, self.ops_assignments)
+        self.respond(
+            self.ops_ancestors_cmd,
+            [assignment("/providers/Microsoft.Management/managementGroups/parent", CUSTOM_ROLE)],
+        )
+        self.assert_sync(1, "übergeordnetem Scope", args=("--operations", "--check"))
+
+    def test_operations_rejects_wrong_assignment_role_or_subscription(self):
+        self.setup_operations()
+        for role_id in (
+            self.ops_role_id.replace(SUB, FORMER),
+            self.ops_role_id.replace(CUSTOM_ROLE, ACR_PUSH),
+        ):
+            with self.subTest(role_id=role_id):
+                altered = {**self.ops_assignments[0], "roleDefinitionId": role_id}
+                self.respond(self.ops_assignments_cmd, [altered, *self.ops_assignments[1:]])
+                self.assert_sync(1, "exakt drei direkte", args=("--operations", "--check"))
+
+    def test_operations_rejects_definition_id_in_wrong_subscription(self):
+        self.setup_operations()
+        self.ops_role_id = self.ops_role_id.replace(SUB, FORMER)
+        self.respond_operations_role()
+        self.assert_sync(1, "unerwartete ARM-ID", args=("--operations", "--check"))
+
+    def test_operations_accepts_qualified_group_definition_and_subscription_assignment(self):
+        self.setup_operations()
+        self.ops_role_id = (
+            f"{RG_ID}/providers/Microsoft.Authorization/roleDefinitions/{CUSTOM_ROLE}"
+        )
+        self.respond_operations_role()
+        group_assignment = {**self.ops_assignments[0], "roleDefinitionId": self.ops_role_id.upper()}
+        self.respond(self.ops_assignments_cmd, [group_assignment, *self.ops_assignments[1:]])
+        self.assert_sync(0, "bereits aktuell", args=("--operations", "--check"))
 
 
 if __name__ == "__main__":
