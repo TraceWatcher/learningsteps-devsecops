@@ -196,14 +196,52 @@ terraform output -raw learningsteps_api_client_id
 
 ### C2. GitHub-OIDC aktualisieren
 
+Nach erfolgreicher Infrastruktur-Neuerstellung diesen Schritt aus dem
+Repository-Stamm ausführen. Das aktive Azure-Konto benötigt Leserechte auf die
+Managed Identity, die Federated Credentials, ACR, AKS und Azure RBAC.
+Die GitHub-CLI benötigt Leserechte für die OIDC-Konfiguration und die
+Variablen des Environments `production`. Für die anschließende Synchronisierung
+benötigt sie zudem Schreibrechte für diese Variablen.
+
 ```bash
-terraform output -raw github_actions_client_id |
-gh variable set AZURE_CLIENT_ID \
-  --repo TraceWatcher/learningsteps-devsecops \
-  --env production
+bash scripts/sync-github-azure-identity.sh --check
 ```
 
-Anschließend den OIDC-Login mit einer dafür vorgesehenen nichtdestruktiven Prüfung validieren.
+| Exit-Code | Bedeutung von `--check` |
+| --- | --- |
+| `0` | Die geprüfte Konfiguration ist gültig und `AZURE_CLIENT_ID` ist aktuell. |
+| `1` | Eine Abweichung wurde erkannt. Die Meldung nennt die betroffene Prüfung. |
+| `2` | Die Prüfung konnte wegen eines technischen Fehlers nicht abgeschlossen werden, etwa wegen fehlender Berechtigungen oder einer unvollständigen API-Antwort. |
+
+`--check` arbeitet ausschließlich lesend. Das Skript prüft die vorhandene
+ID-basierte Federated Credential, den mit `AcrPush` kompatiblen ACR-RBAC-Modus
+und die durch Terraform vorgesehenen direkten Zuweisungen für `AcrPush` auf
+der Release-Registry und für die AKS-Custom-Rolle am Cluster. Fehlende direkte
+Zuweisungen sind eine Konfigurationsabweichung.
+Sichtbare geerbte Zuweisungen werden gesondert gemeldet. Die vollständige
+effektive Autorisierung kann zusätzlich von Gruppenmitgliedschaften, Bedingungen,
+Deny Assignments und der Replikation in Azure abhängen.
+
+Meldet `--check` ausschließlich eine veraltete oder fehlende `AZURE_CLIENT_ID`,
+die Synchronisierung vor dem nächsten GitHub-Release ausdrücklich ausführen.
+Das Skript wiederholt die Vorprüfungen, aktualisiert bei Bedarf ausschließlich
+`AZURE_CLIENT_ID` in `production` und liest den gespeicherten Wert zur Bestätigung
+zurück. Bei einer anderen Abweichung oder einem technischen Fehler zuerst die
+gemeldete Ursache klären.
+
+```bash
+bash scripts/sync-github-azure-identity.sh
+```
+
+Bei einem Fehler während des Schreibens oder Rücklesens den tatsächlich
+gespeicherten Wert erneut mit `--check` prüfen. Die Synchronisierung ist ein
+expliziter Schritt nach dem Provisioning.
+
+Nach dem AKS-Bootstrap kann der manuelle Workflow
+[LearningSteps Azure OIDC Test](../.github/workflows/oidc-test.yml) auf einem
+zulässigen vorhandenen `v`-Tag den OIDC-Login und den lesenden AKS-Zugriff
+prüfen. Der Test erwartet ein vorhandenes API-Deployment im Namespace
+`learningsteps`.
 
 ### C3. Kubernetes Workload Identity
 
