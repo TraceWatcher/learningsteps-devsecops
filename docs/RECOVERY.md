@@ -191,6 +191,9 @@ Das Apply-Ergebnis prüfen. Ein erfolgreicher Terraform-Apply ist noch kein Bewe
 
 ```bash
 terraform output -raw github_actions_client_id
+terraform output -raw github_operations_client_id
+terraform output -raw github_operations_tenant_id
+terraform output -raw github_operations_postgres_server_name
 terraform output -raw learningsteps_api_client_id
 ```
 
@@ -242,6 +245,110 @@ Nach dem AKS-Bootstrap kann der manuelle Workflow
 zulässigen vorhandenen `v`-Tag den OIDC-Login und den lesenden AKS-Zugriff
 prüfen. Der Test erwartet ein vorhandenes API-Deployment im Namespace
 `learningsteps`.
+
+#### Environment Control nach Review freischalten
+
+Die Operations-Identity `id-learningsteps-github-operations` verwendet
+`production-operations` als OIDC-Kontext. Terraform stellt dafür die
+Federated Credential, die Custom Role und ausschließlich die drei direkten
+Zuweisungen an AKS, PostgreSQL Flexible Server und Maintenance-VM bereit.
+Der bestehende C2-Aufruf synchronisiert die Release-Identity in `production`.
+
+1. Nach Code-Review den Terraform-Plan prüfen. Für diese Einführung sind
+   sechs neue Azure-Ressourcen und die drei neuen Terraform-Outputs erwartet.
+   Änderungen oder Ersetzungen der Release-Identität, ihrer Federation
+   oder ihrer Rollenzuweisungen blockieren die Freigabe.
+2. In GitHub unter **Settings → Environments** `production-operations`
+   manuell anlegen. Unter **Selected branches and tags** genau eine
+   **Branch**-Regel mit `main` und keine Tag-Regeln konfigurieren.
+   **Required reviewers** mit mindestens einer berechtigten Person oder
+   einem Team konfigurieren und **Prevent self-review** aktivieren.
+   Jede Ausführung braucht eine zweite berechtigte Person, die den Lauf
+   nicht selbst ausgelöst hat. Ein Einzelentwickler ohne einen solchen
+   Reviewer kann das Environment nicht freigeben. Wenn der GitHub-Plan
+   Required Reviewers oder Prevent self-review nicht unterstützt,
+   bleibt Environment Control deaktiviert.
+   In der GitHub-Oberfläche zusätzlich **Allow administrators to bypass
+   configured protection rules** deaktivieren und die Einstellung vor
+   der Freigabe manuell kontrollieren. Die im Workflow verwendeten
+   REST-Endpunkte liefern den Administrator-Bypass nicht zur Prüfung.
+   Erst nach dieser Kontrolle das separat freigegebene
+   Terraform-Provisioning mit der neuen Federated Credential ausführen.
+3. In diesem Environment `AZURE_TENANT_ID` aus
+   `github_operations_tenant_id`, `AZURE_SUBSCRIPTION_ID` aus der für
+   Terraform verwendeten Subscription und `POSTGRES_SERVER_NAME` aus
+   `github_operations_postgres_server_name` setzen. Auf Repository- oder
+   Organisationsebene keine Ersatzwerte für diese Operations-Konfiguration
+   bereitstellen. Die Client-ID wird über die getrennte Synchronisierung
+   aus der Operations-Identity ermittelt.
+4. Nach Provisioning und RBAC-Replikation aus dem Repository-Stamm prüfen
+   und bei ausschließlich fehlender oder veralteter Client-ID synchronisieren.
+   Tenant, Subscription und PostgreSQL-Name vor jedem Rebuild-Abgleich
+   anhand der aktuellen Infrastruktur prüfen.
+
+   ```bash
+   bash scripts/sync-github-azure-identity.sh --operations --check
+   bash scripts/sync-github-azure-identity.sh --operations
+   bash scripts/sync-github-azure-identity.sh --operations --check
+   ```
+
+   Der Operations-Modus prüft zusätzlich die unten aufgeführten
+   REST-sichtbaren Environment-Einstellungen,
+   die einzige erwartete Federated Credential, die exakten acht Aktionen
+   der Custom Role und die Rollenzuweisungen für die Operations-Identity
+   in der Subscription sowie an übergeordneten Scopes. Die
+   `roleDefinitionId` der Zuweisungen wird einschließlich Subscription und
+   ARM-Pfad mit der erwarteten Rollendefinition abgeglichen.
+   Die Vorprüfungen benötigen Azure-RBAC-Leserechte auf Subscription-Ebene
+   und GitHub-Leserechte für die Environment-Schutzregeln und -Variablen.
+
+5. Als letzten Schritt die Repository-Variable `OPERATIONS_ENVIRONMENT_ID`
+   mit der ID des eingerichteten Environments setzen. Die folgende Abfrage
+   prüft den Environment-Namen, eine gültige ID und, sofern übergeben, die
+   erwartete ID. Sie verlangt benutzerdefinierte Branch-Regeln mit genau
+   einer Regel vom Typ `branch` für `main` sowie genau eine Required-Reviewers-Regel
+   mit mindestens einem User- oder Team-Eintrag und `prevent_self_review: true`.
+   Administrator-Bypass, Teammitgliedschaften und die tatsächliche Verfügbarkeit
+   einer zweiten berechtigten Person sind Gegenstand der manuellen Kontrolle.
+
+   ```bash
+   bash scripts/check-operations-environment.sh TraceWatcher/learningsteps-devsecops
+   ```
+
+   Vor dem Löschen oder Umkonfigurieren des Environments die Aktivierungsvariable
+   entfernen und laufende oder wartende Operations-Runs beenden lassen oder
+   abbrechen. Vor einer Löschung oder Abschwächung der Schutzregeln zuerst
+   auch die Operations-Federation in Azure separat deaktivieren. Der
+   OIDC-Subject ist an den Environment-Namen gebunden.
+   GitHub prüft die Environment-Existenz nicht atomar mit der
+   Jobplanung. Eine gleichzeitige Löschung kann daher zwischen Vorprüfung und
+   Jobplanung eine implizite Neuanlage auslösen. Die erneute Prüfung der
+   ursprünglichen Environment-ID blockiert in diesem Fall den Azure-Login.
+6. Nach Freigabe den manuellen Workflow auf `main` zuerst mit `status`
+   ausführen. Im Preflight und bei der erneuten Prüfung vor dem Azure-Login
+   müssen beide GET-Endpunkte mit dem jeweiligen Job-`GITHUB_TOKEN` erreichbar
+   sein. GitHub dokumentiert für `GET .../environments/production-operations`
+   und `GET .../environments/production-operations/deployment-branch-policies`
+   die Berechtigung **Actions: read** für GitHub-App-Installationstokens.
+   Lokale Tests prüfen die API-Antworten mit Stubs. Der Lauf mit dem
+   tatsächlichen Job-Token ist die erforderliche Live-Prüfung. Bei einem
+   Fehler `OPERATIONS_ENVIRONMENT_ID` wieder entfernen und den API-Fehler
+   untersuchen.
+   Die auslösende Person darf den Job nicht selbst freigeben. Die Freigabe
+   erfolgt durch die zweite berechtigte Person. Der erfolgreiche Statuslauf
+   bestätigt OIDC sowie die Azure-Reads für AKS, PostgreSQL und den direkten
+   VM-Instance-View-Endpunkt. Start und Stop separat in einer Testumgebung
+   beziehungsweise im genehmigten Wartungsfenster prüfen. Der Workflow
+   wartet nach jeder angenommenen Azure-Operation bis zu zehn Minuten auf
+   den Zielzustand. AKS und PostgreSQL erlauben ihren jeweiligen
+   Ausgangszustand und danach `Starting` beim Start oder `Stopping` beim
+   Stop. AKS verlangt für den Zielzustand zusätzlich `provisioningState: Succeeded`.
+   Bei der VM-Deallokation sind auf dem Weg zum Zielzustand
+   `running → stopping → stopped → deallocating` zulässig, beginnend
+   beim jeweiligen Ausgangszustand. Azure darf Zustände überspringen.
+   Unbekannte Zustände oder Rücksprünge nach einem beobachteten Fortschritt
+   brechen den Lauf ab. Ein Abbruch kann eine bereits angenommene Azure-Operation
+   weiterlaufen lassen. In diesem Fall zuerst den Ressourcenstatus prüfen.
 
 ### C3. Kubernetes Workload Identity
 

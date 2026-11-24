@@ -50,6 +50,9 @@ jobs:
       - name: Test GitHub–Azure identity sync
         run: python scripts/test-sync-github-azure-identity.py -v
 
+      - name: Test environment control
+        run: python scripts/test-control-environment.py -v
+
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
 
