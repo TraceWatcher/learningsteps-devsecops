@@ -135,6 +135,9 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.env.*
+!.env.example
+!web/.env.example
 
 # Spyder project settings
 .spyderproject
@@ -188,6 +191,7 @@ crash.*.log
 
 # Terraform plan files
 *.tfplan
+*.tfplan.json
 tfplan
 
 # Frontend
@@ -200,6 +204,13 @@ web/.env.*
 # Local integration environment
 compose.integration.local.yaml
 
-# Backups
+# Encrypted and local recovery artifacts
+*.age
+*.dump.age
 *.dump
 *.backup
+*.bak
+*.pem
+*.pfx
+*.p12
+*.key

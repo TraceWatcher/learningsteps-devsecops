@@ -39,6 +39,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read
 
     steps:
       - name: Checkout repository
@@ -66,6 +67,34 @@ jobs:
           fi
 
           echo "Release validated: $TAG"
+
+      - name: Verify successful CI for release commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          echo "Checking CI for commit: $GITHUB_SHA"
+
+          runs=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f head_sha="$GITHUB_SHA" \
+            -f event="push" \
+            -f branch="main" \
+            --method GET \
+            --jq '.workflow_runs')
+
+          success_count=$(jq \
+            '[.[] | select(.status == "completed" and .conclusion == "success")] | length' \
+            <<< "$runs")
+
+          if [[ "$success_count" -lt 1 ]]; then
+            echo "::error::No successful main CI run for release commit"
+            exit 1
+          fi
+
+          echo "PASS: Successful CI run found"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -124,6 +153,55 @@ jobs:
           scan-ref: infra-terraform/
           severity: HIGH,CRITICAL
           exit-code: "1"
+
+      - name: Scan Kubernetes manifests
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          version: "v0.76.1"
+          scan-type: config
+          scan-ref: k8s-manifests/
+          scanners: misconfig
+          severity: HIGH,CRITICAL
+          trivyignores: .trivyignore.yaml
+          exit-code: "1"
+
+
+      - name: Install verified Kubeconform
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KUBECONFORM_VERSION="v0.8.0"
+          KUBECONFORM_SHA256="9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
+
+          curl -fsSL --retry 3 \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            -o /tmp/kubeconform.tar.gz
+
+          echo "${KUBECONFORM_SHA256}  /tmp/kubeconform.tar.gz" \
+            | sha256sum --check --status
+
+          sudo tar -xzf /tmp/kubeconform.tar.gz \
+            -C /usr/local/bin kubeconform
+
+          kubeconform -v
+
+      - name: Validate Kubernetes manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CRD_CATALOG_COMMIT="784ec895547a36e548e6810b41f27baade3a0890"
+
+          kubeconform \
+            -strict \
+            -summary \
+            -verbose \
+            -kubernetes-version 1.36.5 \
+            -schema-location default \
+            -schema-location 'schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -schema-location "https://raw.githubusercontent.com/datreeio/CRDs-catalog/${CRD_CATALOG_COMMIT}/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
+            k8s-manifests/
 
       - name: Build Docker image
         env:
