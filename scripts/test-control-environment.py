@@ -357,23 +357,27 @@ class OperationsTest(unittest.TestCase):
 
     def test_environment_id_must_match_before_branches_are_queried(self):
         protected = {
-            "id": 42,
+            "id": 28365573053,
             "name": "production-operations",
+            "can_admins_bypass": False,
             "deployment_branch_policy": {
                 "protected_branches": False,
                 "custom_branch_policies": True,
             },
             "protection_rules": [
+                {"type": "branch_policy"},
                 {
                     "type": "required_reviewers",
-                    "prevent_self_review": True,
-                    "reviewers": [{"type": "Team", "reviewer": {"id": 73}}],
+                    "prevent_self_review": False,
+                    "reviewers": [
+                        {"type": "User", "reviewer": {"id": 292215891, "login": "TraceWatcher"}}
+                    ],
                 },
             ],
         }
         environment_lookup = github(ENVIRONMENT_PATH, protected)
         result = self.run_script(
-            [environment_lookup], ["check-operations-environment.sh", REPO, "41"]
+            [environment_lookup], ["check-operations-environment.sh", REPO, "28365573054"]
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("Environment-ID", result.stderr)
@@ -388,10 +392,10 @@ class OperationsTest(unittest.TestCase):
                     },
                 ),
             ],
-            ["check-operations-environment.sh", REPO, "42"],
+            ["check-operations-environment.sh", REPO, "28365573053"],
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "42")
+        self.assertEqual(result.stdout.strip(), "28365573053")
 
 
 if __name__ == "__main__":

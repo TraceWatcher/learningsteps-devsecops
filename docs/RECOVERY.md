@@ -261,18 +261,16 @@ Der bestehende C2-Aufruf synchronisiert die Release-Identity in `production`.
 2. In GitHub unter **Settings → Environments** `production-operations`
    manuell anlegen. Unter **Selected branches and tags** genau eine
    **Branch**-Regel mit `main` und keine Tag-Regeln konfigurieren.
-   **Required reviewers** mit mindestens einer berechtigten Person oder
-   einem Team konfigurieren und **Prevent self-review** aktivieren.
-   Jede Ausführung braucht eine zweite berechtigte Person, die den Lauf
-   nicht selbst ausgelöst hat. Ein Einzelentwickler ohne einen solchen
-   Reviewer kann das Environment nicht freigeben. Wenn der GitHub-Plan
-   Required Reviewers oder Prevent self-review nicht unterstützt,
+   Unter **Required reviewers** ausschließlich den Benutzer `TraceWatcher`
+   (User-ID `292215891`) eintragen und **Prevent self-review** deaktivieren.
+   So kann `TraceWatcher` einen selbst ausgelösten Lauf manuell freigeben.
+   Die Reviewer-Freigabe bleibt auch in der Einzelentwickler-Konfiguration
+   erforderlich. Wenn der GitHub-Plan Required Reviewers nicht unterstützt,
    bleibt Environment Control deaktiviert.
    In der GitHub-Oberfläche zusätzlich **Allow administrators to bypass
-   configured protection rules** deaktivieren und die Einstellung vor
-   der Freigabe manuell kontrollieren. Die im Workflow verwendeten
-   REST-Endpunkte liefern den Administrator-Bypass nicht zur Prüfung.
-   Erst nach dieser Kontrolle das separat freigegebene
+   configured protection rules** deaktivieren. Die Environment-API liefert
+   diese Einstellung als `can_admins_bypass: false`.
+   Erst nach Prüfung dieser Konfiguration das separat freigegebene
    Terraform-Provisioning mit der neuen Federated Credential ausführen.
 3. In diesem Environment `AZURE_TENANT_ID` aus
    `github_operations_tenant_id`, `AZURE_SUBSCRIPTION_ID` aus der für
@@ -303,13 +301,15 @@ Der bestehende C2-Aufruf synchronisiert die Release-Identity in `production`.
    und GitHub-Leserechte für die Environment-Schutzregeln und -Variablen.
 
 5. Als letzten Schritt die Repository-Variable `OPERATIONS_ENVIRONMENT_ID`
-   mit der ID des eingerichteten Environments setzen. Die folgende Abfrage
+   mit der ID des eingerichteten Environments setzen (aktuell `28365573053`).
+   Die folgende Abfrage
    prüft den Environment-Namen, eine gültige ID und, sofern übergeben, die
    erwartete ID. Sie verlangt benutzerdefinierte Branch-Regeln mit genau
-   einer Regel vom Typ `branch` für `main` sowie genau eine Required-Reviewers-Regel
-   mit mindestens einem User- oder Team-Eintrag und `prevent_self_review: true`.
-   Administrator-Bypass, Teammitgliedschaften und die tatsächliche Verfügbarkeit
-   einer zweiten berechtigten Person sind Gegenstand der manuellen Kontrolle.
+   einer Regel vom Typ `branch` für `main`. Außerdem prüft sie genau eine
+   Required-Reviewers-Regel mit genau einem User-Eintrag für `TraceWatcher`
+   (ID `292215891`), `prevent_self_review: false` und
+   `can_admins_bypass: false`. Fehlende Einstellungen blockieren die
+   Synchronisierung und den Workflow.
 
    ```bash
    bash scripts/check-operations-environment.sh TraceWatcher/learningsteps-devsecops
@@ -334,8 +334,9 @@ Der bestehende C2-Aufruf synchronisiert die Release-Identity in `production`.
    tatsächlichen Job-Token ist die erforderliche Live-Prüfung. Bei einem
    Fehler `OPERATIONS_ENVIRONMENT_ID` wieder entfernen und den API-Fehler
    untersuchen.
-   Die auslösende Person darf den Job nicht selbst freigeben. Die Freigabe
-   erfolgt durch die zweite berechtigte Person. Der erfolgreiche Statuslauf
+   Den Job manuell als `TraceWatcher` freigeben. Mit deaktiviertem
+   **Prevent self-review** gilt das auch für einen selbst ausgelösten Lauf.
+   Der erfolgreiche Statuslauf
    bestätigt OIDC sowie die Azure-Reads für AKS, PostgreSQL und den direkten
    VM-Instance-View-Endpunkt. Start und Stop separat in einer Testumgebung
    beziehungsweise im genehmigten Wartungsfenster prüfen. Der Workflow

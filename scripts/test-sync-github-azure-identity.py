@@ -452,7 +452,8 @@ class IdentitySyncTest(unittest.TestCase):
         )
         self.ops_environment = {
             "name": environment,
-            "id": 42,
+            "id": 28365573053,
+            "can_admins_bypass": False,
             "deployment_branch_policy": {
                 "protected_branches": False,
                 "custom_branch_policies": True,
@@ -460,9 +461,12 @@ class IdentitySyncTest(unittest.TestCase):
             "protection_rules": [
                 {
                     "type": "required_reviewers",
-                    "prevent_self_review": True,
-                    "reviewers": [{"type": "User", "reviewer": {"id": 72}}],
+                    "prevent_self_review": False,
+                    "reviewers": [
+                        {"type": "User", "reviewer": {"id": 292215891, "login": "TraceWatcher"}}
+                    ],
                 },
+                {"type": "branch_policy"},
             ],
         }
         self.respond(self.ops_environment_cmd, self.ops_environment)
@@ -541,27 +545,65 @@ class IdentitySyncTest(unittest.TestCase):
         self.setup_operations()
         self.respond(self.ops_environment_cmd, status=1)
         self.assert_sync(2, "manuell angelegt", args=("--operations",))
-        self.ops_environment["protection_rules"][0]["prevent_self_review"] = False
+        reviewer_rule, branch_rule = self.ops_environment["protection_rules"]
+        for rules in (
+            [],
+            [reviewer_rule],
+            [branch_rule],
+            [reviewer_rule, reviewer_rule, branch_rule],
+        ):
+            with self.subTest(rules=rules):
+                self.respond(
+                    self.ops_environment_cmd, {**self.ops_environment, "protection_rules": rules}
+                )
+                self.assert_sync(1, "Reviewer-Regel", args=("--operations",))
         self.respond(self.ops_environment_cmd, self.ops_environment)
-        self.assert_sync(1, "Reviewer-Regel", args=("--operations",))
-        self.ops_environment["protection_rules"][0]["prevent_self_review"] = True
-        self.respond(self.ops_environment_cmd, self.ops_environment)
-        for policies in ([{"name": "main", "type": "tag"}], [{"name": "*", "type": "branch"}]):
-            self.respond(self.ops_branch_cmd, {"total_count": 1, "branch_policies": policies})
-            self.assert_sync(1, "genau eine Branch-Regel für main", args=("--operations",))
+        main = {"name": "main", "type": "branch"}
+        for policies in (
+            [],
+            [{"name": "main", "type": "tag"}],
+            [{"name": "*", "type": "branch"}],
+            [main, {"name": "develop", "type": "branch"}],
+            [main, {"name": "v*", "type": "tag"}],
+        ):
+            with self.subTest(policies=policies):
+                self.respond(
+                    self.ops_branch_cmd, {"total_count": len(policies), "branch_policies": policies}
+                )
+                self.assert_sync(1, "genau eine Branch-Regel für main", args=("--operations",))
 
-    def test_operations_fails_closed_when_reviewer_settings_are_incomplete(self):
+    def test_operations_fails_closed_when_reviewer_settings_differ(self):
         self.setup_operations()
-        reviewer_rule = self.ops_environment["protection_rules"][0]
+        reviewer_rule, branch_rule = self.ops_environment["protection_rules"]
+        reviewer = reviewer_rule["reviewers"][0]
+        other = {"type": "User", "reviewer": {"id": 73, "login": "another-user"}}
         for overrides in (
+            {"prevent_self_review": True},
             {"prevent_self_review": None},
             {"reviewers": []},
-            {"reviewers": [{"type": "Team"}]},
+            {"reviewers": [{**reviewer, "type": "Team"}]},
+            {"reviewers": [{**reviewer, "reviewer": {**reviewer["reviewer"], "id": 73}}]},
+            {"reviewers": [{**reviewer, "reviewer": {**reviewer["reviewer"], "login": "renamed"}}]},
+            {"reviewers": [reviewer, other]},
         ):
             with self.subTest(overrides=overrides):
-                self.ops_environment["protection_rules"] = [{**reviewer_rule, **overrides}]
-                self.respond(self.ops_environment_cmd, self.ops_environment)
+                self.respond(
+                    self.ops_environment_cmd,
+                    {
+                        **self.ops_environment,
+                        "protection_rules": [{**reviewer_rule, **overrides}, branch_rule],
+                    },
+                )
                 self.assert_sync(1, "Reviewer-Regel", args=("--operations",))
+
+    def test_operations_requires_explicitly_disabled_administrator_bypass(self):
+        self.setup_operations()
+        self.ops_environment["can_admins_bypass"] = True
+        self.respond(self.ops_environment_cmd, self.ops_environment)
+        self.assert_sync(1, "Administrator-Bypass", args=("--operations",))
+        self.ops_environment.pop("can_admins_bypass")
+        self.respond(self.ops_environment_cmd, self.ops_environment)
+        self.assert_sync(1, "Administrator-Bypass", args=("--operations",))
 
     def test_operations_rejects_wrong_or_additional_federation(self):
         self.setup_operations()
