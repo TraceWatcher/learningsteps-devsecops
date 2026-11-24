@@ -1,9 +1,11 @@
 # LearningSteps – Infrastructure Recovery Runbook
 
 **Projekt:** LearningSteps DevSecOps on Azure
-**Stand:** 23.11.2026
-**Status:** PASS – Functional infrastructure and application recovery completed
-**Ziel:** Vollständige Wiederherstellung der LearningSteps-Infrastruktur und Anwendung nach einem kontrollierten Terraform-Destroy.
+**Recovery-Testdatum:** 23.11.2026
+**Status:** PASS für den kontrollierten Terraform-Rebuild, PostgreSQL-Restore
+und den funktionalen Wiederanlauf am 23.11.2026.
+**Ziel:** Infrastruktur und Anwendung nach einem kontrollierten
+Terraform-Destroy wiederherstellen und die getesteten Funktionen belegen.
 
 ## 1. Recovery-Ziel und Umfang
 
@@ -37,7 +39,7 @@ Das Terraform-Remote-Backend befindet sich außerhalb der Workload-Resource-Grou
 | Voraussetzung | Ergebnis |
 |---|---|
 | Terraform-Remote-State erreichbar | PASS |
-| CI/CD-Release v0.7.0 | PASS |
+| Historischer CI/CD-Release v0.7.0 | PASS bei damals aktiviertem AKS-Deployment |
 | Negativer Terraform-Security-Test | PASS |
 | Datenbankschema unter PostgreSQL 16 erstellt | PASS |
 | Datenbankmigrationen ausgeführt | PASS |
@@ -47,7 +49,7 @@ Das Terraform-Remote-Backend befindet sich außerhalb der Workload-Resource-Grou
 | Vier Datensätze wiederhergestellt | PASS |
 | Ownership-Constraint getestet | PASS |
 | Verschlüsselte Secret-Sicherung per SHA-256 verglichen | PASS |
-| Vollständiger Azure-Destroy-/Apply-Test | PASS – 23.11.2026 |
+| Kontrollierter Azure-Destroy-/Apply-Test | PASS – 23.11.2026, separates Terraform-Backend blieb erhalten |
 
 Die Datenbank enthält zum Zeitpunkt der Sicherung vier Einträge, davon einen mit und drei ohne `owner_id`. Die drei historischen Einträge ohne Besitzer bleiben aufgrund der `NOT VALID`-Migration erhalten.
 
@@ -389,16 +391,25 @@ Falls das Secret nicht wiederhergestellt wurde, steht die verschlüsselte Sicher
 
 Den tatsächlich bereitgestellten Registry-Namen und Login-Server überprüfen.
 
-API- und Web-Images müssen erneut bereitgestellt werden:
+Für den dokumentierten Wiederaufbau wurden diese API- und Web-Images
+erneut bereitgestellt:
 
 - API: `learningsteps-api:v0.7.0`
 - Web: `learningsteps-web:v0.6.0-recovery-fix2`
 
-Die API wird aus der passenden Release-Version mit `APP_VERSION=v0.7.0` gebaut.
-
-Das Frontend wird aus dem zugehörigen, nachvollziehbaren Quellstand gebaut.
+Für diesen Test wurde die API aus der passenden Release-Version mit
+`APP_VERSION=v0.7.0` gebaut. Das Frontend wurde aus dem zugehörigen
+Quellstand gebaut.
 
 Der ACR-Name ist derzeit in Kubernetes-Manifests und GitHub Actions fest hinterlegt. Bei einem veränderten Registry-Namen müssen diese Referenzen angepasst werden.
+
+Der tagbasierte API-Release veröffentlicht das geprüfte Image in ACR.
+Der anschließende AKS-Schritt läuft nur bei `ENABLE_AKS_AUTO_DEPLOY=true`.
+Bei der lesenden Prüfung am 24.11.2026 war der Schalter im Environment
+`production` deaktiviert. Der historische Release `v0.7.0` lief mit
+aktiviertem AKS-Deployment. Beim Rebuild werden Image-Veröffentlichung
+und Kubernetes-Rollout separat verifiziert.
+[Aktueller Release-Ablauf](OPERATIONS.md#api-release)
 
 ### D2. AKS-Grundkonfiguration
 
@@ -509,8 +520,9 @@ Das getestete PostgreSQL-Backup und die geprüfte verschlüsselte Secret-Sicheru
 
 **Testdatum:** 23.11.2026
 
-**Gesamtergebnis:** PASS – Funktionale Wiederherstellung nach
-kontrolliertem Infrastrukturverlust nachgewiesen.
+**Gesamtergebnis:** PASS für den kontrollierten Infrastruktur-Rebuild,
+den PostgreSQL-Restore und den funktionalen Wiederanlauf im unten
+dokumentierten Testumfang. Das Terraform-Backend blieb bestehen.
 
 ### 11.1 Infrastruktur
 
@@ -701,6 +713,7 @@ nicht durch unkontrolliertes Überschreiben entfernt werden.
 - Funktion der KI-Zusammenfassung nach dem Rebuild
 - Vollständige Azure-Monitor-Telemetrie
 - Unbeaufsichtigte End-to-End-Recovery
+- Wiederherstellung einer früheren Terraform-State-Version
 - Wiederanlauf aus einem teilweise abgeschlossenen
   ACR-Recovery-Push
 

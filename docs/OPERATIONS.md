@@ -299,7 +299,10 @@ Das Anzeigen der Ressourcenliste ist eine lesende Prüfung.
 
 ### Wiederherstellung
 
-Eine Wiederherstellung einer früheren State-Version wurde bisher nicht praktisch getestet.
+Das separate Remote-Backend blieb beim kontrollierten Infrastruktur-Rebuild
+vom 23.11.2026 erhalten. Die Wiederherstellung einer früheren State-Version
+bleibt ein eigener, noch offener Test.
+[Recovery-Ergebnis](RECOVERY.md#111-infrastruktur)
 
 Ein Restore darf nicht allein anhand des Datums einer älteren Version durchgeführt werden. Der wiederhergestellte State muss zur tatsächlichen Infrastruktur passen.
 
@@ -309,29 +312,22 @@ Vor einem Restore sind die betroffenen Ressourcen, der aktuelle State und mögli
 
 Die Anwendung verwendet Container-Images aus Azure Container Registry.
 
-Die GitHub-Actions-Pipeline `.github/workflows/release.yml` automatisiert den Build und die Bereitstellung der API.
+Der tagbasierte [Release-Workflow](../.github/workflows/release.yml) automatisiert
+den Build, die Prüfung und die Veröffentlichung des API-Images in ACR.
 
 ### API-Release
 
-Die vorhandene Release-Pipeline enthält folgende Schritte:
+Nach erfolgreicher Prüfung veröffentlicht der Workflow das API-Image in
+Azure Container Registry. Der nachgelagerte Schritt **Deploy to AKS** läuft
+bei `ENABLE_AKS_AUTO_DEPLOY=true`. Er setzt den Image-Tag im API-Manifest,
+wendet ConfigMap, Deployment und HPA über `az aks command invoke` an und
+prüft den Rollout sowie den Exit-Code von Run Command.
 
-1. Container-Image bauen.
-2. Container-Image in Azure Container Registry übertragen.
-3. Kubernetes-Deployment-Manifest auf die neue Image-Version aktualisieren.
-4. ConfigMap, API-Deployment und HPA anwenden.
-5. Rollout-Status überprüfen.
-
-Die Bereitstellung erfolgt über die vorhandene Azure- und Kubernetes-Integration der Pipeline.
-
-**Automatisiertes AKS-Deployment:**
-
-Die Release-Pipeline führt die Kubernetes-Bereitstellung nur aus, wenn die GitHub-Repository-Variable `ENABLE_AKS_AUTO_DEPLOY` den Wert `true` besitzt.
-
-Das geprüfte Container-Image wird zunächst in die Azure Container Registry übertragen. Anschließend erfolgt bei aktivierter Bereitstellung die Aktualisierung über `az aks command invoke`.
-
-Die Pipeline prüft den Kubernetes-Rollout und den Exit-Code des Azure Run Commands.
-
-Ein erfolgreich veröffentliches Container-Image bedeutet daher nicht zwangsläufig, dass dieses Image bereits auf AKS bereitgestellt wurde.
+Der Schalter ist im GitHub-Environment `production` konfiguriert. Bei der
+lesenden Prüfung am 24.11.2026 war er deaktiviert. Ein erfolgreicher Image-Push
+belegt die Veröffentlichung in ACR. Für einen AKS-Rollout ist das Ergebnis des
+Deployment-Schritts maßgeblich. Der frühere Release-Test `v0.7.0` belegt den
+Pfad mit damals aktiviertem Schalter. [Historischer Release-Test](TESTING.md#ci-05--automatisiertes-azure-deployment)
 
 ### Deployment überprüfen
 
@@ -445,9 +441,13 @@ Die Speicherung erfolgt mit LRS.
 
 ### Wiederherstellungsstatus
 
-Ein vollständiger PostgreSQL-Restore wurde bisher nicht nachgewiesen.
-
-Vor einer produktiven Nutzung müssten mindestens Wiederherstellungszeit, Datenintegrität und Anwendungskonsistenz überprüft werden.
+Am 23.11.2026 wurde das verschlüsselte PostgreSQL-Backup auf dem neu
+bereitgestellten Server eingespielt. Der Test bestätigte vier
+wiederhergestellte Datensätze, Constraints und Indizes sowie den Zugriff
+der Anwendung auf das DB-Secret über Key Vault CSI. Die vollständige
+Anwendungsregression nach dem Restore und belastbare Aussagen zur
+Wiederherstellungszeit bleiben offen.
+[PostgreSQL-Restore und Verifikation](RECOVERY.md#112-postgresql-und-key-vault)
 
 ## 12. Kostenkontrolle
 
@@ -560,9 +560,9 @@ Sicherheitsrelevante Daten dürfen bei einer Untersuchung nicht unkontrolliert g
 - Die Azure-Monitor-Alarmregel ist vorbereitet, aber nicht bereitgestellt.
 - Eine automatische Benachrichtigung bei API-Ausfällen fehlt.
 - Ein externer automatisierter HTTPS-Test fehlt.
-- Die Wiederherstellung von PostgreSQL und Terraform-State wurde noch nicht praktisch nachgewiesen.
+- Der getestete PostgreSQL-Restore deckt den dokumentierten Datenbestand ab. Ein vollständiger Anwendungsregressionstest nach dem Rebuild bleibt offen.
 - Der Terraform-State-Storage verwendet bisher keine restriktive Netzwerk-Standardregel.
-- Eine unabhängige Sicherung und ein praktischer Wiederherstellungstest des Terraform-States stehen noch aus.
+- Eine unabhängige Sicherung und die praktische Wiederherstellung einer früheren Terraform-State-Version stehen noch aus.
 - Die Lifecycle-Policy entfernt frühere Terraform-State-Versionen nach mehr als 90 Tagen; langfristige Aufbewahrung ist damit nicht gewährleistet.
 - Ein vollständiger automatisierter Cleanup-Prozess ist nicht dokumentiert.
 
