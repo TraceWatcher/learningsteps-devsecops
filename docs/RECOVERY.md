@@ -281,6 +281,8 @@ Der bestehende C2-Aufruf synchronisiert die Release-Identity in `production`.
    Organisationsebene keine Ersatzwerte für diese Operations-Konfiguration
    bereitstellen. Die Client-ID wird über die getrennte Synchronisierung
    aus der Operations-Identity ermittelt.
+   `OPERATIONS_APP_URL` erst nach Prüfung der bereitgestellten Route und
+   der öffentlichen Erreichbarkeit setzen. [Adresse abgleichen](#d3-aks-default-domain-ermitteln)
 4. Nach Provisioning und RBAC-Replikation aus dem Repository-Stamm prüfen
    und bei ausschließlich fehlender oder veralteter Client-ID synchronisieren.
    Tenant, Subscription und PostgreSQL-Name vor jedem Rebuild-Abgleich
@@ -429,17 +431,41 @@ Dabei sind Abhängigkeiten und Kubernetes-Readiness zu beachten. Der bestehende 
 ### D3. AKS Default Domain ermitteln
 
 ```bash
-az aks approuting defaultdomain show \
+DOMAIN=$(az aks approuting defaultdomain show \
   --resource-group rg-learningsteps-devsecops \
   --name aks-learningsteps \
-  -o json
+  --query domainName -o tsv)
+[[ "$DOMAIN" == *.aksapp.io ]] && printf 'learningsteps.%s\n' "$DOMAIN"
 ```
 
-Den neu zugewiesenen Hostnamen in Gateway und HTTPRoute übernehmen.
+Den vollständigen Anwendungshost `learningsteps.<domainName>` im
+HTTPS-Listener des Gateways und in der HTTPRoute eintragen. Die
+AKS-Standarddomain liefert den Basisnamen. Maßgeblich für den Healthcheck
+ist der Hostname der bereitgestellten Route.
 
 Die neue HTTPS-Adresse gegebenenfalls als Redirect-URI in der Microsoft-Entra-App-Registrierung ergänzen.
 
 Das Frontend verwendet `window.location.origin`, sodass keine statische Redirect-Adresse im JavaScript geändert werden muss.
+
+Sobald DNS, TLS und die Anwendung bereit sind, den Host aus der
+bereitgestellten HTTPRoute lesen und aus dem Repository-Stamm prüfen.
+
+```bash
+HOST=$(kubectl -n learningsteps get httproute learningsteps-route \
+  -o jsonpath='{.spec.hostnames[0]}')
+APP_URL="https://$HOST" bash scripts/check-operations-health.sh
+```
+
+Bei erfolgreicher Prüfung in GitHub unter **Settings → Environments →
+production-operations → Environment variables** die Variable
+`OPERATIONS_APP_URL` mit `https://<HOST>` setzen oder aktualisieren.
+Als Wert den öffentlichen HTTPS-Origin ohne Pfad, Port oder Zugangsdaten
+verwenden. Bei jedem Rebuild den Wert explizit mit der neuen HTTPRoute
+abgleichen. `status` und `stop` benötigen diese Variable nicht.
+Der Workflow verwendet den geprüften Wert für den Start-Healthcheck.
+Die vorgesehene Operations-Rolle enthält weder eine Aktion zum Abruf
+von Clusterzugangsdaten noch AKS Run Command. Die Routenabfrage erfolgt
+mit dem vorhandenen Administrationskontext.
 
 ## 8. Phase E – PostgreSQL-Daten wiederherstellen
 
@@ -486,7 +512,7 @@ Nach dem Kubernetes-Bootstrap sind folgende Nachweise erforderlich:
 | Gateway | Programmed=True |
 | HTTPS | Gültige Verbindung |
 | `/api/health/live` | HTTP 200 |
-| `/api/health/ready` | HTTP 200 |
+| `/api/health/ready` | HTTP 200, `application/json`, `status=ready`, `database=connected` |
 | `/api/health/version` | Gewünschte Release-Version |
 | Entra-Anmeldung | Erfolgreich |
 | Journaleinträge lesen | Erfolgreich |

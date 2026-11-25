@@ -53,6 +53,9 @@ jobs:
       - name: Test environment control
         run: python scripts/test-control-environment.py -v
 
+      - name: Test Operations start healthcheck
+        run: python scripts/test-operations-health.py -v
+
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
 
