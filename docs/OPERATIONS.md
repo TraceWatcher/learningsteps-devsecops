@@ -28,9 +28,21 @@ Die beschriebenen Prüfkommandos sind grundsätzlich lesend. Zustandsverändernd
 | Terraform-Verzeichnis | `infra-terraform/` |
 | Kubernetes-Manifeste | `k8s-manifests/` |
 
-Die Anwendung ist öffentlich über HTTPS erreichbar:
+Der öffentliche Anwendungshost ist am HTTPS-Listener des Gateways
+konfiguriert. Im aktuellen AKS-Kontext lässt er sich abfragen.
 
-`https://learningsteps.6aff4a07cf83170001eabf87.westeurope.aksapp.io`
+```bash
+HOST=$(kubectl -n learningsteps get gateway learningsteps-gateway \
+  -o jsonpath='{.spec.listeners[?(@.name=="https")].hostname}')
+test -n "$HOST" && printf 'https://%s\n' "$HOST"
+```
+
+Bei einem AKS-Rebuild kann sich die zugewiesene Standarddomain ändern.
+Für den Start-Healthcheck liest GitHub Actions die HTTPS-Adresse aus
+`OPERATIONS_APP_URL` im Environment `production-operations`. Nach einem
+Rebuild den Wert mit der bereitgestellten HTTPRoute abgleichen und
+gezielt aktualisieren.
+[Adresse nach dem Rebuild synchronisieren](RECOVERY.md#d3-aks-default-domain-ermitteln)
 
 ## 3. Administratorzugang
 
@@ -95,20 +107,27 @@ kubectl rollout status deployment/learningsteps-web \
 
 ### Externer Healthcheck
 
-```bash
-HOST="learningsteps.6aff4a07cf83170001eabf87.westeurope.aksapp.io"
+Den `HOST` wie in der [Infrastrukturübersicht](#2-infrastrukturübersicht)
+aus dem HTTPS-Listener ermitteln und aus dem Repository-Stamm prüfen.
 
-curl -sS \
-  --connect-timeout 5 \
-  --max-time 15 \
-  -o /dev/null \
-  -w "HTTP %{http_code} | Dauer: %{time_total}s\n" \
-  "https://$HOST/api/health/ready"
+```bash
+APP_URL="https://$HOST" bash scripts/check-operations-health.sh
 ```
 
-Erwartet wird HTTP 200.
+Der öffentliche API-Pfad ist `/api/health/ready`. Der Check verlangt
+HTTP 200, `Content-Type: application/json` und die JSON-Felder
+`status=ready` und `database=connected`. Die API prüft dafür PostgreSQL
+mit `SELECT 1`. Der interne Pfad `/health/ready` wird am öffentlichen
+Gateway der Web-Route zugeordnet und kann HTML liefern. Das Skript prüft
+außerdem das Frontend und die Ablehnung eines API-Zugriffs ohne Anmeldung.
 
-Dieser Endpunkt prüft zusätzlich zur API-Erreichbarkeit die PostgreSQL-Verbindung mit einer `SELECT 1`-Abfrage.
+Die Workflow-Prüfung unterscheidet DNS- und TLS-Fehler, unerwartete
+HTTP-Statuscodes, Content-Types und JSON-Antworten. Bei einem DNS-Fehler
+zuerst `OPERATIONS_APP_URL` mit dem Host der aktuellen HTTPRoute vergleichen.
+Die Variable enthält ausschließlich den öffentlichen HTTPS-Origin der
+LearningSteps-AKS-Standarddomain, ohne Pfad oder Zugangsdaten. Eine
+fehlende oder syntaktisch ungültige Adresse blockiert `start` vor dem
+Azure-Login.
 
 ### Kubernetes-Probes
 
@@ -340,15 +359,7 @@ kubectl get pods -n learningsteps
 kubectl get hpa -n learningsteps
 ```
 
-Anschließend sollte die externe API-Readiness geprüft werden.
-
-```bash
-curl -sS -o /dev/null \
-  -w "HTTP %{http_code}\n" \
-  "https://learningsteps.6aff4a07cf83170001eabf87.westeurope.aksapp.io/api/health/ready"
-```
-
-Erwartet wird HTTP 200.
+Anschließend den [externen Healthcheck](#externer-healthcheck) ausführen.
 
 ### Frontend-Deployment
 
